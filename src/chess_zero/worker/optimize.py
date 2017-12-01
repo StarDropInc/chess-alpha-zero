@@ -7,12 +7,10 @@ import keras.backend as k
 import numpy as np
 from keras.optimizers import SGD
 
-from chess_zero.agent.model_chess import ChessModel, objective_function_for_policy, \
-    objective_function_for_value
+from chess_zero.agent.model_chess import ChessModel, objective_function_for_policy, objective_function_for_value
 from chess_zero.config import Config
 from chess_zero.lib import tf_util
-from chess_zero.lib.data_helper import get_game_data_filenames, read_game_data_from_file, \
-    get_next_generation_model_dirs
+from chess_zero.lib.data_helper import get_game_data_filenames, read_game_data_from_file, get_next_generation_model_dirs
 from chess_zero.lib.model_helper import load_best_model_weight
 from chess_zero.env.chess_env import ChessEnv
 import chess
@@ -21,7 +19,7 @@ logger = getLogger(__name__)
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.59)
+    tf_util.set_session_config(per_process_gpu_memory_fraction=0.2)
     return OptimizeWorker(config).start()
 
 
@@ -107,7 +105,6 @@ class OptimizeWorker:
             state_ary_list.append(s_ary)
             policy_ary_list.append(p_ary)
             z_ary_list.append(z_ary_)
-
         state_ary = np.concatenate(state_ary_list)
         policy_ary = np.concatenate(policy_ary_list)
         z_ary = np.concatenate(z_ary_list)
@@ -128,7 +125,7 @@ class OptimizeWorker:
         if not dirs:
             logger.debug(f"loading best model")
             if not load_best_model_weight(model):
-                raise RuntimeError(f"Best model can not loaded!")
+                raise RuntimeError(f"Best model cannot be loaded!")
         else:
             latest_dir = dirs[-1]
             logger.debug(f"loading latest model")
@@ -152,7 +149,10 @@ class OptimizeWorker:
 
         if updated:
             logger.debug("updating training dataset")
-            self.dataset = self.collect_all_loaded_data()
+            try:
+                self.dataset = self.collect_all_loaded_data()
+            except Exception as e:
+                logger.warning(str(e))
 
     def load_data_from_file(self, filename):
         try:
@@ -180,11 +180,11 @@ class OptimizeWorker:
         policy_list = []
         z_list = []
         for state, policy, z in data:
-            env = ChessEnv().update(state)
+            env = ChessEnv().update(state)  # no syzygy_dir need be passed here; as the method is static (but why?) none could be.
 
-            black_ary, white_ary = env.black_and_white_plane()
-            state = [black_ary, white_ary] if env.board.turn == chess.BLACK else [white_ary, black_ary]
-
+            white_ary, black_ary = env.white_and_black_plane()
+            state = [white_ary, black_ary] if env.board.turn == chess.WHITE else [black_ary, white_ary]
+            state = np.reshape(np.array(state), (12, 8, 8))
             state_list.append(state)
             policy_list.append(policy)
             z_list.append(z)

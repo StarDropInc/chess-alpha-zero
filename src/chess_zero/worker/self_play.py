@@ -8,15 +8,14 @@ from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
 from chess_zero.lib import tf_util
 from chess_zero.lib.data_helper import get_game_data_filenames, write_game_data_to_file
-from chess_zero.lib.model_helper import load_best_model_weight, save_as_best_model, \
-    reload_best_model_weight_if_changed
+from chess_zero.lib.model_helper import load_best_model_weight, save_as_best_model, reload_best_model_weight_if_changed
 
 logger = getLogger(__name__)
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.5)
-    return SelfPlayWorker(config, env=ChessEnv()).start()
+    tf_util.set_session_config(per_process_gpu_memory_fraction=0.2)
+    return SelfPlayWorker(config, env=ChessEnv(config.resource.syzygy_dir)).start()
 
 
 class SelfPlayWorker:
@@ -29,9 +28,9 @@ class SelfPlayWorker:
         """
         self.config = config
         self.model = model
-        self.env = env     # type: ChessEnv
-        self.black = None  # type: ChessPlayer
+        self.env = env  # type: ChessEnv
         self.white = None  # type: ChessPlayer
+        self.black = None  # type: ChessPlayer
         self.buffer = []
 
     def start(self):
@@ -53,14 +52,12 @@ class SelfPlayWorker:
 
     def start_game(self, idx):
         self.env.reset()
-        self.black = ChessPlayer(self.config, self.model)
         self.white = ChessPlayer(self.config, self.model)
+        self.black = ChessPlayer(self.config, self.model)
         observation = self.env.observation
         while not self.env.done:
-            if self.env.board.turn == chess.BLACK:
-                action = self.black.action(observation)
-            else:
-                action = self.white.action(observation)
+            ai = self.white if self.env.board.turn == chess.WHITE else self.black
+            action = ai.action(observation)
             board, info = self.env.step(action)
             observation = board.fen()
         self.finish_game()
@@ -90,15 +87,15 @@ class SelfPlayWorker:
             os.remove(files[i])
 
     def finish_game(self):
-        if self.env.winner == Winner.black:
-            black_win = 1
-        elif self.env.winner == Winner.white:
-            black_win = -1
+        if self.env.winner == Winner.WHITE:
+            white_win = 1
+        elif self.env.winner == Winner.BLACK:
+            white_win = -1
         else:
-            black_win = 0
+            white_win = 0
 
-        self.black.finish_game(black_win)
-        self.white.finish_game(-black_win)
+        self.white.finish_game(white_win)
+        self.black.finish_game(-white_win)
 
     def load_model(self):
         from chess_zero.agent.model_chess import ChessModel
