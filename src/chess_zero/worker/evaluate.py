@@ -62,7 +62,7 @@ class EvaluateWorker:
                 logger.debug(f"win count has reached {results.count(1)}, so change best model")
                 break
 
-        winning_rate = sum(results) / len(results) if len(results) != 0 else 0
+        winning_rate = sum(results) / len(results)
         logger.debug(f"winning rate {winning_rate*100:.1f}%")
         return winning_rate >= self.config.eval.replace_rate
 

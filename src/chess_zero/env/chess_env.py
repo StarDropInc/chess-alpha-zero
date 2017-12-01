@@ -49,7 +49,7 @@ class ChessEnv:
 
         self.turn += 1
 
-        if self.board.is_game_over() or self.board.can_claim_draw() or self.num_pieces() <= 5: # replace with a direct syzygy probe?
+        if self.board.is_game_over() or self.board.can_claim_draw() or self.num_pieces() <= 5:  # replace with a direct syzygy probe?
             self._game_over()
 
         return self.board, {}
