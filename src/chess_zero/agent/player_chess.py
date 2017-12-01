@@ -52,7 +52,7 @@ class ChessPlayer:
 
     def action(self, board):
 
-        env = ChessEnv().update(board)
+        env = ChessEnv(self.config.resource.syzygy_dir).update(board)
         key = self.counter_key(env)
 
         for tl in range(self.play_config.thinking_loop):
@@ -70,15 +70,20 @@ class ChessPlayer:
         self.thinking_history[env.observation] = HistoryItem(action, policy, list(self.var_q[key]), list(self.var_n[key]))
 
         if self.play_config.resign_threshold is not None and \
-            env.score_current() <= self.play_config.resign_threshold and \
-                self.play_config.min_resign_turn < env.turn:
-            return None  # means resign
+           self.play_config.min_resign_turn < env.turn and \
+           env.absolute_eval(self.retrieve_eval(env.observation)) <= self.play_config.resign_threshold:
+           return None  # means resign
         else:
             self.moves.append([env.observation, list(policy)])
             return self.config.labels[action]
 
     def ask_thought_about(self, board) -> HistoryItem:
         return self.thinking_history.get(board)
+
+    def retrieve_eval(self, observation):
+        last_history = self.ask_thought_about(observation)
+        last_evaluation = last_history.values[last_history.action]
+        return last_evaluation
 
     @profile
     def search_moves(self, board):
@@ -93,14 +98,14 @@ class ChessPlayer:
 
         coroutine_list.append(self.prediction_worker())
         loop.run_until_complete(asyncio.gather(*coroutine_list))
-        #logger.debug(f"Search time per move: {time.time()-start}")
+        # logger.debug(f"Search time per move: {time.time()-start}")
         # uncomment to see profile result per move
         # raise
 
     async def start_search_my_move(self, board):
         self.running_simulation_num += 1
         with await self.sem:  # reduce parallel search number
-            env = ChessEnv().update(board)
+            env = ChessEnv(self.config.resource.syzygy_dir).update(board)
             leaf_v = await self.search_my_move(env, is_root_node=True)
             self.running_simulation_num -= 1
             return leaf_v
@@ -108,16 +113,16 @@ class ChessPlayer:
     async def search_my_move(self, env: ChessEnv, is_root_node=False):
         """
 
-        Q, V is value for this Player(always white).
-        P is value for the player of next_player (black or white)
+        Q, V is value for this Player (always white).
+        P is value for the player of next_player (white or black)
         :param env:
         :param is_root_node:
         :return:
         """
         if env.done:
-            if env.winner == Winner.white:
+            if env.winner == Winner.WHITE:
                 return 1
-            elif env.winner == Winner.black:
+            elif env.winner == Winner.BLACK:
                 return -1
             else:
                 return 0
@@ -133,7 +138,7 @@ class ChessPlayer:
             if env.board.turn == chess.WHITE:
                 return leaf_v  # Value for white
             else:
-                return -leaf_v  # Value for white == -Value for white
+                return -leaf_v  # Value for black == -Value for white
 
         action_t = self.select_action_q_and_u(env, is_root_node)
 
@@ -165,14 +170,14 @@ class ChessPlayer:
         key = self.counter_key(env)
         self.now_expanding.add(key)
 
-        black_ary, white_ary = env.black_and_white_plane()
-        state = [black_ary, white_ary] if env.board.turn == chess.BLACK else [white_ary, black_ary]
-        future = await self.predict(np.array(state))  # type: Future
+        white_ary, black_ary = env.white_and_black_plane()
+        state = [white_ary, black_ary] if env.board.turn == chess.WHITE else [black_ary, white_ary]
+        future = await self.predict(np.reshape(np.array(state), (12, 8, 8)))  # type: Future
 
         await future
         leaf_p, leaf_v = future.result()
 
-        self.var_p[key] = leaf_p  # P is value for next_player (black or white)
+        self.var_p[key] = leaf_p  # P is value for next_player (white or black)
 
         self.expanded.add(key)
         self.now_expanding.remove(key)
@@ -219,7 +224,7 @@ class ChessPlayer:
         :return:
         """
         pc = self.play_config
-        env = ChessEnv().update(board)
+        env = ChessEnv(self.config.resource.syzygy_dir).update(board)
         key = self.counter_key(env)
         if env.turn < pc.change_tau_turn:
             return self.var_n[key] / (np.sum(self.var_n[key])+1e-8)  # tau = 1

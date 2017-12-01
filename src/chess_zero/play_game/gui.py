@@ -13,7 +13,7 @@ def start(config: Config):
     PlayWithHumanConfig().update_play_config(config.play)
     chess_model = PlayWithHuman(config)
 
-    env = ChessEnv().reset()
+    env = ChessEnv(config.resource.syzygy_dir).reset()
     human_is_black = random() < 0.5
     chess_model.start_game(human_is_black)
 
@@ -28,6 +28,6 @@ def start(config: Config):
         env.render()
         print("Board FEN = " + board.fen())
 
-    print("\nEnd of the game.") #spaces after this?
-    print("Game result:") #and this?
+    print("\nEnd of the game.")
+    print("Game result:")
     print(env.board.result())

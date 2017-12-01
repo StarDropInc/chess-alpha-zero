@@ -1,5 +1,6 @@
 import enum
 import chess.pgn
+import chess.syzygy
 import numpy as np
 
 from logging import getLogger
@@ -7,16 +8,17 @@ from logging import getLogger
 logger = getLogger(__name__)
 
 # noinspection PyArgumentList
-Winner = enum.Enum("Winner", "black white draw")
+Winner = enum.Enum("Winner", "WHITE BLACK DRAW")
 
 
 class ChessEnv:
-    def __init__(self):
+    def __init__(self, syzygy_dir=None):
         self.board = None
         self.turn = 0
         self.done = False
         self.winner = None  # type: Winner
         self.resigned = False
+        self.syzygy_dir = syzygy_dir
 
     def reset(self):
         self.board = chess.Board()
@@ -47,84 +49,60 @@ class ChessEnv:
 
         self.turn += 1
 
-        if self.board.is_game_over() or self.board.can_claim_threefold_repetition():
+        if self.board.is_game_over() or self.board.can_claim_draw() or self.num_pieces() <= 5: # replace with a direct syzygy probe?
             self._game_over()
 
         return self.board, {}
 
     def _game_over(self):
         self.done = True
-        if self.winner is None:
-            result = self.board.result()
-            if result == '1-0':
-                self.winner = Winner.white
-            elif result == '0-1':
-                self.winner = Winner.black
-            else:
-                val_black, val_white = self.score_board()
-                if val_black > val_white:
-                    self.winner = Winner.black
-                elif val_black < val_white:
-                    self.winner = Winner.white
-                else:
-                    self.winner = Winner.draw
-
-    def score_current(self):
-        val_black, val_white = self.score_board()
-        if self.board.turn == chess.WHITE:
-            return val_black - val_white
+        result = self.board.result()
+        if result == '1/2-1/2' or self.board.can_claim_draw():
+            self.winner = Winner.DRAW
+        elif self.board.is_game_over():
+            self.winner = Winner.WHITE if result == '1-0' else Winner.BLACK
         else:
-            return val_white - val_black
+            probe = 0
+            with chess.syzygy.open_tablebases(self.syzygy_dir) as tablebases:
+                probe = tablebases.probe_wdl(self.board)
+            if probe >= 2:
+                self.winner = Winner.WHITE if self.board.turn == chess.WHITE else Winner.BLACK
+            elif probe <= -2:
+                self.winner = Winner.BLACK if self.board.turn == chess.WHITE else Winner.WHITE
+            else:
+                self.winner = Winner.DRAW
 
-    def score_board(self):
-        board_state = self.replace_tags()
-        pieces_white = [val if val.isupper() and val != "1" else 0 for val in board_state.split(" ")[0]]
-        pieces_black = [val if val.islower() and val != "1" else 0 for val in board_state.split(" ")[0]]
-        val_white = 0.0
-        val_black = 0.0
-        for piece in pieces_white:
-            if piece == 'Q':
-                val_white += 10.0
-            elif piece == 'R':
-                val_white += 5.5
-            elif piece == 'B':
-                val_white += 3.5
-            elif piece == 'N':
-                val_white += 3
-            elif piece == 'P':
-                val_white += 1
-        for piece in pieces_black:
-            if piece == 'q':
-                val_black += 10.0
-            elif piece == 'r':
-                val_black += 5.5
-            elif piece == 'b':
-                val_black += 3.5
-            elif piece == 'n':
-                val_black += 3
-            elif piece == 'p':
-                val_black += 1
-        return val_black, val_white
 
+    def absolute_eval(self, relative_eval):
+        return relative_eval if self.board.turn == chess.WHITE else -relative_eval
 
     def _resigned(self):
-        self._win_another_player()
-        self._game_over()
+        self._win_other_player()
+        self.done = True
         self.resigned = True
 
-    def _win_another_player(self):
-        if self.board.turn == chess.BLACK:
-            self.winner = Winner.black
-        else:
-            self.winner = Winner.white
+    def _win_other_player(self):
+        self.winner = Winner.BLACK if self.board.turn == chess.WHITE else Winner.WHITE
 
-    def black_and_white_plane(self):
+    def num_pieces(self):
         board_state = self.replace_tags()
-        board_white = [ord(val) if val.isupper() and val != "1" else 0 for val in board_state.split(" ")[0]]
-        board_white = np.reshape(board_white, (8, 8))
-        # Only black plane
-        board_black = [ord(val) if val.islower() and val != "1" else 0 for val in board_state.split(" ")[0]]
-        board_black = np.reshape(board_black, (8, 8))
+        return len([val for val in board_state.split(" ")[0] if val != "1"])
+
+    def white_and_black_plane(self):
+        board_state = self.replace_tags()
+
+        one_hot = {}
+        one_hot.update(dict.fromkeys(['K', 'k'], [1, 0, 0, 0, 0, 0]))
+        one_hot.update(dict.fromkeys(['Q', 'q'], [0, 1, 0, 0, 0, 0]))
+        one_hot.update(dict.fromkeys(['R', 'r'], [0, 0, 1, 0, 0, 0]))
+        one_hot.update(dict.fromkeys(['B', 'b'], [0, 0, 0, 1, 0, 0]))
+        one_hot.update(dict.fromkeys(['N', 'n'], [0, 0, 0, 0, 1, 0]))
+        one_hot.update(dict.fromkeys(['P', 'p'], [0, 0, 0, 0, 0, 1]))
+
+        board_white = [one_hot[val] if val.isupper() else [0, 0, 0, 0, 0, 0] for val in board_state.split(" ")[0]]
+        board_white = np.transpose(np.reshape(board_white, (8, 8, 6)), (2, 0, 1))
+        board_black = [one_hot[val] if val.islower() else [0, 0, 0, 0, 0, 0] for val in board_state.split(" ")[0]]
+        board_black = np.transpose(np.reshape(board_black, (8, 8, 6)), (2, 0, 1))
 
         return board_white, board_black
 

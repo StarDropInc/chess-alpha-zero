@@ -36,7 +36,7 @@ class EvaluateWorker:
             logger.debug(f"start evaluate model {model_dir}")
             ng_is_great = self.evaluate_model(ng_model)
             if ng_is_great:
-                logger.debug(f"New Model become best model: {model_dir}")
+                logger.debug(f"new model becomes the best model: {model_dir}")
                 save_as_best_model(ng_model)
                 self.best_model = ng_model
             self.remove_model(model_dir)
@@ -44,57 +44,47 @@ class EvaluateWorker:
     def evaluate_model(self, ng_model):
         results = []
         winning_rate = 0
-        for game_idx in range(self.config.eval.game_num):
+        game_idx = 0;
+        while game_idx < self.config.eval.game_num:
+            game_idx += 1
             # ng_win := if ng_model win -> 1, lose -> 0, draw -> None
-            ng_win, white_is_best = self.play_game(self.best_model, ng_model)
+            ng_win, ng_is_white = self.play_game(self.best_model, ng_model)
             if ng_win is not None:
                 results.append(ng_win)
                 winning_rate = sum(results) / len(results)
-            logger.debug(f"game {game_idx}: ng_win={ng_win} white_is_best_model={white_is_best} "
-                         f"winning rate {winning_rate*100:.1f}%")
+            else:
+                game_idx -= 1
+            logger.debug(f"game {game_idx}: ng won = {ng_win}, ng played white = {ng_is_white}, winning rate = {winning_rate*100:.1f}%")
             if results.count(0) >= self.config.eval.game_num * (1-self.config.eval.replace_rate):
-                logger.debug(f"lose count reach {results.count(0)} so give up challenge")
+                logger.debug(f"lose count has reached {results.count(0)}, so give up challenge")
                 break
             if results.count(1) >= self.config.eval.game_num * self.config.eval.replace_rate:
-                logger.debug(f"win count reach {results.count(1)} so change best model")
+                logger.debug(f"win count has reached {results.count(1)}, so change best model")
                 break
 
-        winning_rate = sum(results) / len(results)
+        winning_rate = sum(results) / len(results) if len(results) != 0 else 0
         logger.debug(f"winning rate {winning_rate*100:.1f}%")
         return winning_rate >= self.config.eval.replace_rate
 
     def play_game(self, best_model, ng_model):
-        env = ChessEnv().reset()
+        env = ChessEnv(self.config.resource.syzygy_dir).reset()
 
         best_player = ChessPlayer(self.config, best_model, play_config=self.config.eval.play_config)
         ng_player = ChessPlayer(self.config, ng_model, play_config=self.config.eval.play_config)
-        best_is_white = random() < 0.5
-        if not best_is_white:
-            black, white = best_player, ng_player
-        else:
-            black, white = ng_player, best_player
+        ng_is_white = random() < 0.5
+        (white, black) = (ng_player, best_player) if ng_is_white else (best_player, ng_player)
 
         observation = env.observation
         while not env.done:
-            if env.board.turn == chess.BLACK:
-                action = black.action(observation)
-            else:
-                action = white.action(observation)
+            ai = white if env.board.turn == chess.WHITE else black
+            action = ai.action(observation)
             board, info = env.step(action)
             observation = board.fen()
 
         ng_win = None
-        if env.winner == Winner.white:
-            if best_is_white:
-                ng_win = 0
-            else:
-                ng_win = 1
-        elif env.winner == Winner.black:
-            if best_is_white:
-                ng_win = 1
-            else:
-                ng_win = 0
-        return ng_win, best_is_white
+        if env.winner != Winner.DRAW:
+            ng_win = ng_is_white == (env.winner == Winner.WHITE)
+        return ng_win, ng_is_white
 
     def load_best_model(self):
         model = ChessModel(self.config)
@@ -107,7 +97,7 @@ class EvaluateWorker:
             dirs = get_next_generation_model_dirs(self.config.resource)
             if dirs:
                 break
-            logger.info(f"There is no next generation model to evaluate")
+            logger.info(f"there is no next-generation model to evaluate")
             sleep(60)
         model_dir = dirs[-1] if self.config.eval.evaluate_latest_first else dirs[0]
         config_path = os.path.join(model_dir, rc.next_generation_model_config_filename)

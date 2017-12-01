@@ -19,8 +19,8 @@ class PlayWithHuman:
         self.last_evaluation = None
         self.last_history = None  # type: HistoryItem
 
-    def start_game(self, human_is_black):
-        self.human_color = chess.BLACK if human_is_black else chess.WHITE
+    def start_game(self, human_is_white):
+        self.human_color = chess.WHITE if human_is_white else chess.BLACK
         self.ai = ChessPlayer(self.config, self.model)
 
     def _load_model(self):

@@ -9,6 +9,8 @@ def _project_dir():
 def _data_dir():
     return os.path.join(_project_dir(), "data")
 
+def _syzygy_dir():
+    return os.path.join(_project_dir(), "syzygy")
 
 def create_uci_labels():
     labels_array = []
@@ -18,13 +20,13 @@ def create_uci_labels():
 
     for l1 in range(8):
         for n1 in range(8):
-            destinations = [(t, n1) for t in range(0,8)] + \
-                           [(l1, t) for t in range(0,8)] + \
+            destinations = [(t, n1) for t in range(8)] + \
+                           [(l1, t) for t in range(8)] + \
                            [(l1 + t, n1 + t) for t in range(-7,8)] + \
                            [(l1 + t, n1 - t) for t in range(-7,8)] + \
                            [(l1 + a, n1 + b) for (a, b) in [(-2, -1), (-1, -2), (-2, 1), (1, -2), (2, -1), (-1, 2), (2, 1), (1, 2)]]
             for (l2, n2) in destinations:
-                if (l1, n1) != (l2, n2) and l2 in range(0,8) and n2 in range(0,8):
+                if (l1, n1) != (l2, n2) and l2 in range(8) and n2 in range(8):
                     move = letters[l1] + numbers[n1] + letters[l2] + numbers[n2]
                     labels_array.append(move)
     for l1 in range(8):
@@ -50,6 +52,8 @@ class Config:
 
         if config_type == "mini":
             import chess_zero.configs.mini as c
+        elif config_type == "small":
+            import chess_zero.configs.small as c
         elif config_type == "normal":
             import chess_zero.configs.normal as c
         else:
@@ -74,6 +78,7 @@ class ResourceConfig:
         self.model_dir = os.environ.get("MODEL_DIR", os.path.join(self.data_dir, "model"))
         self.model_best_config_path = os.path.join(self.model_dir, "model_best_config.json")
         self.model_best_weight_path = os.path.join(self.model_dir, "model_best_weight.h5")
+        self.syzygy_dir = os.environ.get("SYZYGY_DIR", _syzygy_dir())
 
         self.next_generation_model_dir = os.path.join(self.model_dir, "next_generation")
         self.next_generation_model_dirname_tmpl = "model_%s"
@@ -87,8 +92,7 @@ class ResourceConfig:
         self.main_log_path = os.path.join(self.log_dir, "main.log")
 
     def create_directories(self):
-        dirs = [self.project_dir, self.data_dir, self.model_dir, self.play_data_dir, self.log_dir,
-                self.next_generation_model_dir]
+        dirs = [self.project_dir, self.data_dir, self.model_dir, self.play_data_dir, self.log_dir, self.next_generation_model_dir, self.syzygy_dir]
         for d in dirs:
             if not os.path.exists(d):
                 os.makedirs(d)
