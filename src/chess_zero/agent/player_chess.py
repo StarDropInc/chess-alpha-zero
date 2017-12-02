@@ -72,7 +72,7 @@ class ChessPlayer:
         if self.play_config.resign_threshold is not None and \
            self.play_config.min_resign_turn < env.turn and \
            env.absolute_eval(self.retrieve_eval(env.observation)) <= self.play_config.resign_threshold:
-           return None  # means resign
+            return None  # means resign
         else:
             self.moves.append([env.observation, list(policy)])
             return self.config.labels[action]
@@ -242,9 +242,9 @@ class ChessPlayer:
         key = self.counter_key(env)
 
         """Bottlenecks are these two lines"""
-        legal_moves = [self.move_lookup[mov] for mov in env.board.legal_moves]
+        legal_moves = [self.move_lookup[move] for move in env.board.legal_moves]
         legal_labels = np.zeros(len(self.config.labels))
-        #logger.debug(legal_moves)
+        # logger.debug(legal_moves)
         legal_labels[legal_moves] = 1
 
 

@@ -61,12 +61,13 @@ class SelfPlayWorker:
             board, info = self.env.step(action)
             observation = board.fen()
         self.finish_game()
-        self.save_play_data(write=idx % self.config.play_data.nb_game_in_file == 0)
+        if self.env.winner != Winner.DRAW:  # only save self-play data for a non-drawn game...!?
+            self.save_play_data(write=idx % self.config.play_data.nb_game_in_file == 0)
         self.remove_play_data()
         return self.env
 
     def save_play_data(self, write=True):
-        data = self.black.moves + self.white.moves
+        data = self.white.moves + self.black.moves
         self.buffer += data
 
         if not write:
