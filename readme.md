@@ -143,6 +143,9 @@ tf_util.set_session_config(per_process_gpu_memory_fraction=0.2)
 Less batch_size will reduce memory usage of `opt`.
 Try to change `TrainerConfig#batch_size` in `NormalConfig`.
 
+Syzygy Tablebases
+-------
+This implementation uses the syzygy tablebases for endgame evaluation. The tablebase files should be placed into the directory chess-alpha-zero/syzygy. They can be generated from scratch through [the github repository](https://github.com/syzygy1/tb), or downloaded via the torrent "Syzygy 3-4-5 Individual Files" [here](http://oics.olympuschess.com/tracker/index.php).
 
 Model Performance
 -------
