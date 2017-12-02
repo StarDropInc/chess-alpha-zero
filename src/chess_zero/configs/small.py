@@ -50,3 +50,4 @@ class ModelConfig:
     res_layer_num = 7
     l2_reg = 1e-4
     value_fc_size = 128
+    distributed = False

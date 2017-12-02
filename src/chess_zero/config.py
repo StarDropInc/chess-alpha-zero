@@ -22,8 +22,8 @@ def create_uci_labels():
         for n1 in range(8):
             destinations = [(t, n1) for t in range(8)] + \
                            [(l1, t) for t in range(8)] + \
-                           [(l1 + t, n1 + t) for t in range(-7,8)] + \
-                           [(l1 + t, n1 - t) for t in range(-7,8)] + \
+                           [(l1 + t, n1 + t) for t in range(-7, 8)] + \
+                           [(l1 + t, n1 - t) for t in range(-7, 8)] + \
                            [(l1 + a, n1 + b) for (a, b) in [(-2, -1), (-1, -2), (-2, 1), (1, -2), (2, -1), (-1, 2), (2, 1), (1, 2)]]
             for (l2, n2) in destinations:
                 if (l1, n1) != (l2, n2) and l2 in range(8) and n2 in range(8):
@@ -56,6 +56,8 @@ class Config:
             import chess_zero.configs.small as c
         elif config_type == "normal":
             import chess_zero.configs.normal as c
+        elif config_type == "distributed":
+            import chess_zero.configs.distributed as c
         else:
             raise RuntimeError(f"unknown config_type: {config_type}")
         self.model = c.ModelConfig()
@@ -76,9 +78,14 @@ class ResourceConfig:
         self.project_dir = os.environ.get("PROJECT_DIR", _project_dir())
         self.data_dir = os.environ.get("DATA_DIR", _data_dir())
         self.model_dir = os.environ.get("MODEL_DIR", os.path.join(self.data_dir, "model"))
+        self.syzygy_dir = os.environ.get("SYZYGY_DIR", _syzygy_dir())
         self.model_best_config_path = os.path.join(self.model_dir, "model_best_config.json")
         self.model_best_weight_path = os.path.join(self.model_dir, "model_best_weight.h5")
-        self.syzygy_dir = os.environ.get("SYZYGY_DIR", _syzygy_dir())
+
+        self.model_best_distributed_ftp_server = "alpha-chess-zero.mygamesonline.org"
+        self.model_best_distributed_ftp_user = "2537576_chess"
+        self.model_best_distributed_ftp_password = "alpha-chess-zero-2"
+        self.model_best_distributed_ftp_remote_path = "/alpha-chess-zero.mygamesonline.org/"
 
         self.next_generation_model_dir = os.path.join(self.model_dir, "next_generation")
         self.next_generation_model_dirname_tmpl = "model_%s"

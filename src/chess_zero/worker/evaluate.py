@@ -44,16 +44,12 @@ class EvaluateWorker:
     def evaluate_model(self, ng_model):
         results = []
         winning_rate = 0
-        game_idx = 0;
-        while game_idx < self.config.eval.game_num:
-            game_idx += 1
+        for game_idx in range(self.config.eval.game_num):
             # ng_win := if ng_model win -> 1, lose -> 0, draw -> None
             ng_win, ng_is_white = self.play_game(self.best_model, ng_model)
             if ng_win is not None:
                 results.append(ng_win)
                 winning_rate = sum(results) / len(results)
-            else:
-                game_idx -= 1
             logger.debug(f"game {game_idx}: ng won = {ng_win}, ng played white = {ng_is_white}, winning rate = {winning_rate*100:.1f}%")
             if results.count(0) >= self.config.eval.game_num * (1-self.config.eval.replace_rate):
                 logger.debug(f"lose count has reached {results.count(0)}, so give up challenge")
@@ -62,7 +58,7 @@ class EvaluateWorker:
                 logger.debug(f"win count has reached {results.count(1)}, so change best model")
                 break
 
-        winning_rate = sum(results) / len(results)
+        winning_rate = sum(results) / len(results) if len(results) != 0 else 0
         logger.debug(f"winning rate {winning_rate*100:.1f}%")
         return winning_rate >= self.config.eval.replace_rate
 
