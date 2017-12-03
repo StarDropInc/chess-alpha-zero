@@ -234,18 +234,26 @@ class ChessPlayer:
 
     def syzygy_policy(self, board):
         ret = np.zeros(self.labels_n)
+        env = ChessEnv().update(board)
         with chess.syzygy.open_tablebases(self.config.resource.syzygy_dir) as tablebases:
-            env = ChessEnv().update(board)
-            dtz = tablebases.probe_dtz(env.board)
             moves = {}
             for move in env.board.legal_moves:
                 env.board.push(move)
                 moves[move] = tablebases.probe_dtz(env.board)
                 env.board.pop()
-        move = max(moves, key=moves.get) if env.turn == chess.WHITE else min(moves, key=moves.get)
+        mate = {move:dtz for (move, dtz) in moves.items() if dtz < 0}  # mate in -dtz...
+        draw = {move:dtz for (move, dtz) in moves.items() if dtz == 0}  # draw...
+        mated = {move:dtz for (move, dtz) in moves.items() if dtz > 0}  # mated in dtz...
+        if mate:
+            move = max(mate, key=moves.get)
+        elif draw:
+            move = max(draw, key=moves.get)
+        elif mated:
+            move = max(mated, key=moves.get)
         action = self.move_lookup[move]
         ret[action] = 1
         return ret
+
 
 
     @staticmethod
