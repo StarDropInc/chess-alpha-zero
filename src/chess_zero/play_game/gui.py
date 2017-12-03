@@ -24,9 +24,9 @@ def start(config: Config):
         else:
             action = chess_model.move_by_ai(env)
             print("AI moves to: " + action)
-        board = env.step(action)
+        env.step(action)
         env.render()
-        print("Board FEN = " + board.fen())
+        print("Board FEN = " + env.board.fen())
 
     print("\nEnd of the game.")
     print("Game result:")
