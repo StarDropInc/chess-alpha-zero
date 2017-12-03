@@ -32,7 +32,7 @@ class ChessPlayer:
         self.play_config = play_config or self.config.play
         self.api = ChessModelAPI(self.config, self.model)
 
-        self.move_lookup = {k:v for k,v in zip((chess.Move.from_uci(move) for move in self.config.labels),range(len(self.config.labels)))}
+        self.move_lookup = {k:v for k,v in zip((chess.Move.from_uci(move) for move in self.config.labels), range(len(self.config.labels)))}
         self.labels_n = config.n_labels
         self.var_n = defaultdict(lambda: np.zeros((self.labels_n,)))
         self.var_w = defaultdict(lambda: np.zeros((self.labels_n,)))
@@ -51,18 +51,19 @@ class ChessPlayer:
         self.thinking_history = {}  # for fun
 
     def action(self, board):
-
-        env = ChessEnv(self.config.resource.syzygy_dir).update(board)
+        env = ChessEnv().update(board)
         key = self.counter_key(env)
 
         for tl in range(self.play_config.thinking_loop):
             if tl > 0 and self.play_config.logging_thinking:
-                logger.debug(f"continue thinking: policy move=({action % 8}, {action // 8}), "
-                             f"value move=({action_by_value % 8}, {action_by_value // 8})")
-            self.search_moves(board)
-            policy = self.calc_policy(board)
+                logger.debug(f"continue thinking: policy move=({action % 8}, {action // 8}), value move=({action_by_value % 8}, {action_by_value // 8})")
+            if env.num_pieces() <= 5:  # syzygy takes over at this point, to generate training data of optimal quality.
+                policy = self.syzygy_policy(board)  # note: in the essentially impossible situation under which num_pieces <= 5 before the change_tau_turn move, this will violate the temperature...
+            else:
+                self.search_moves(board)
+                policy = self.calc_policy(board)
             action = int(np.random.choice(range(self.labels_n), p=policy))
-            action_by_value = int(np.argmax(self.var_q[key] + (self.var_n[key] > 0)*100))
+            action_by_value = int(np.argmax(self.var_q[key] + (self.var_n[key] > 0)*100))  # what is the point of action_by_value?
             if action == action_by_value or env.turn < self.play_config.change_tau_turn:
                 break
 
@@ -105,7 +106,7 @@ class ChessPlayer:
     async def start_search_my_move(self, board):
         self.running_simulation_num += 1
         with await self.sem:  # reduce parallel search number
-            env = ChessEnv(self.config.resource.syzygy_dir).update(board)
+            env = ChessEnv().update(board)
             leaf_v = await self.search_my_move(env, is_root_node=True)
             self.running_simulation_num -= 1
             return leaf_v
@@ -135,14 +136,11 @@ class ChessPlayer:
         # is leaf?
         if key not in self.expanded:  # reach leaf node
             leaf_v = await self.expand_and_evaluate(env)
-            if env.board.turn == chess.WHITE:
-                return leaf_v  # Value for white
-            else:
-                return -leaf_v  # Value for black == -Value for white
+            return leaf_v if env.board.turn == chess.WHITE else -leaf_v
 
         action_t = self.select_action_q_and_u(env, is_root_node)
 
-        _, _ = env.step(self.config.labels[action_t])
+        env.step(self.config.labels[action_t])
 
         virtual_loss = self.config.play.virtual_loss
         self.var_n[key][action_t] += virtual_loss
@@ -224,7 +222,7 @@ class ChessPlayer:
         :return:
         """
         pc = self.play_config
-        env = ChessEnv(self.config.resource.syzygy_dir).update(board)
+        env = ChessEnv().update(board)
         key = self.counter_key(env)
         if env.turn < pc.change_tau_turn:
             return self.var_n[key] / (np.sum(self.var_n[key])+1e-8)  # tau = 1
@@ -233,6 +231,22 @@ class ChessPlayer:
             ret = np.zeros(self.labels_n)
             ret[action] = 1
             return ret
+
+    def syzygy_policy(self, board):
+        ret = np.zeros(self.labels_n)
+        with chess.syzygy.open_tablebases(self.config.resource.syzygy_dir) as tablebases:
+            env = ChessEnv().update(board)
+            dtz = tablebases.probe_dtz(env.board)
+            moves = {}
+            for move in env.board.legal_moves:
+                env.board.push(move)
+                moves[move] = tablebases.probe_dtz(env.board)
+                env.board.pop()
+        move = max(moves, key=moves.get) if env.turn == chess.WHITE else min(moves, key=moves.get)
+        action = self.move_lookup[move]
+        ret[action] = 1
+        return ret
+
 
     @staticmethod
     def counter_key(env: ChessEnv):

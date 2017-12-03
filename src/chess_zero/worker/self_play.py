@@ -15,7 +15,7 @@ logger = getLogger(__name__)
 
 def start(config: Config):
     tf_util.set_session_config(per_process_gpu_memory_fraction=0.2)
-    return SelfPlayWorker(config, env=ChessEnv(config.resource.syzygy_dir)).start()
+    return SelfPlayWorker(config, env=ChessEnv()).start()
 
 
 class SelfPlayWorker:
@@ -44,8 +44,7 @@ class SelfPlayWorker:
             start_time = time()
             env = self.start_game(idx)
             end_time = time()
-            logger.debug(f"game {idx} time={end_time - start_time} sec, "
-                         f"turn={env.turn}:{env.observation} - Winner:{env.winner} - by resignation?:{env.resigned}")
+            logger.debug(f"game {idx} time={end_time - start_time} sec, turn={env.turn}:{env.observation} - Winner:{env.winner} - by resignation?:{env.resigned}")
             if (idx % self.config.play_data.nb_game_in_file) == 0:
                 reload_best_model_weight_if_changed(self.model)
             idx += 1
@@ -54,15 +53,12 @@ class SelfPlayWorker:
         self.env.reset()
         self.white = ChessPlayer(self.config, self.model)
         self.black = ChessPlayer(self.config, self.model)
-        observation = self.env.observation
         while not self.env.done:
             ai = self.white if self.env.board.turn == chess.WHITE else self.black
-            action = ai.action(observation)
-            board, info = self.env.step(action)
-            observation = board.fen()
+            action = ai.action(self.env.observation)
+            self.env.step(action)
         self.finish_game()
-        if self.env.winner != Winner.DRAW:  # only save self-play data for a non-drawn game...!?
-            self.save_play_data(write=idx % self.config.play_data.nb_game_in_file == 0)
+        self.save_play_data(write=idx % self.config.play_data.nb_game_in_file == 0)
         self.remove_play_data()
         return self.env
 

@@ -63,7 +63,7 @@ class EvaluateWorker:
         return winning_rate >= self.config.eval.replace_rate
 
     def play_game(self, best_model, ng_model):
-        env = ChessEnv(self.config.resource.syzygy_dir).reset()
+        env = ChessEnv().reset()
 
         best_player = ChessPlayer(self.config, best_model, play_config=self.config.eval.play_config)
         ng_player = ChessPlayer(self.config, ng_model, play_config=self.config.eval.play_config)
