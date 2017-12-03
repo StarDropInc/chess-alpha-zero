@@ -254,8 +254,6 @@ class ChessPlayer:
         ret[action] = 1
         return ret
 
-
-
     @staticmethod
     def counter_key(env: ChessEnv):
         return CounterKey(env.replace_tags(), env.board.turn)
