@@ -236,13 +236,26 @@ class ChessPlayer:
         ret = np.zeros(self.labels_n)
         env = ChessEnv().update(board)
         with chess.syzygy.open_tablebases(self.config.resource.syzygy_dir) as tablebases:
-            moves = {}
-            for move in env.board.legal_moves:
+            violent_wins = {}
+            quiets_and_draws = {}
+            violent_losses = {}
+            for move in env.board.legal_moves:  # note: this scheme minimaxes distance to _zero_. distance to mate is not available through chess.syzygy
                 env.board.push(move)
                 dtz = float(tablebases.probe_dtz(env.board))
-                moves[move] = 1/dtz if dtz != 0.0 else 0.0
+                value = 1/dtz if dtz != 0.0 else 0.0
+                if env.board.halfmove_clock == 0 and value < 0:
+                    violent_wins[move] = value
+                elif env.board.halfmove_clock != 0 or value == 0:
+                    quiets_and_draws[move] = value
+                elif env.board.halfmove_clock == 0 and value > 0:
+                    violent_losses[move] = value
                 env.board.pop()
-        move = max(moves, key=moves.get)
+        if violent_wins:
+            move = min(violent_wins, key=violent_wins.get)
+        elif quiets_and_draws:
+            move = min(quiets_and_draws, key=quiets_and_draws.get)
+        elif violent_losses:
+            move = min(violent_losses, key=violent_losses.get)
         action = self.move_lookup[move]
         ret[action] = 1
         return ret
