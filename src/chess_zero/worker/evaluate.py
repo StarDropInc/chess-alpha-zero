@@ -65,17 +65,14 @@ class EvaluateWorker:
     def play_game(self, best_model, ng_model):
         env = ChessEnv().reset()
 
-        best_player = ChessPlayer(self.config, best_model, play_config=self.config.eval.play_config)
         ng_player = ChessPlayer(self.config, ng_model, play_config=self.config.eval.play_config)
+        best_player = ChessPlayer(self.config, best_model, play_config=self.config.eval.play_config)
         ng_is_white = random() < 0.5
-        (white, black) = (ng_player, best_player) if ng_is_white else (best_player, ng_player)
 
-        observation = env.observation
         while not env.done:
-            ai = white if env.board.turn == chess.WHITE else black
-            action = ai.action(observation)
-            board, info = env.step(action)
-            observation = board.fen()
+            ai = ng_player if ng_is_white == (env.board.turn == chess.WHITE) else best_player
+            action = ai.action(env.observation)
+            env.step(action)
 
         ng_win = None
         if env.winner != Winner.DRAW:
