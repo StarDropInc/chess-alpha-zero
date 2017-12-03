@@ -239,17 +239,10 @@ class ChessPlayer:
             moves = {}
             for move in env.board.legal_moves:
                 env.board.push(move)
-                moves[move] = tablebases.probe_dtz(env.board)
+                dtz = float(tablebases.probe_dtz(env.board))
+                moves[move] = 1/dtz if dtz != 0.0 else 0.0
                 env.board.pop()
-        mate = {move:dtz for (move, dtz) in moves.items() if dtz < 0}  # mate in -dtz...
-        draw = {move:dtz for (move, dtz) in moves.items() if dtz == 0}  # draw...
-        mated = {move:dtz for (move, dtz) in moves.items() if dtz > 0}  # mated in dtz...
-        if mate:
-            move = max(mate, key=moves.get)
-        elif draw:
-            move = max(draw, key=moves.get)
-        elif mated:
-            move = max(mated, key=moves.get)
+        move = max(moves, key=moves.get)
         action = self.move_lookup[move]
         ret[action] = 1
         return ret
