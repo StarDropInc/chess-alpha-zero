@@ -12,17 +12,14 @@ Winner = enum.Enum("Winner", "WHITE BLACK DRAW")
 
 
 class ChessEnv:
-    def __init__(self, syzygy_dir=None):
+    def __init__(self):
         self.board = None
-        self.turn = 0
         self.done = False
         self.winner = None  # type: Winner
         self.resigned = False
-        self.syzygy_dir = syzygy_dir
 
     def reset(self):
         self.board = chess.Board()
-        self.turn = 0
         self.done = False
         self.winner = None
         self.resigned = False
@@ -30,7 +27,6 @@ class ChessEnv:
 
     def update(self, board):
         self.board = chess.Board(board)
-        self.turn = self.board.fullmove_number
         self.done = False
         self.winner = None
         self.resigned = False
@@ -43,46 +39,29 @@ class ChessEnv:
         """
         if action is None:
             self._resigned()
-            return self.board, {}
+            return
 
         self.board.push_uci(action)
 
-        self.turn += 1
-
-        if self.board.is_game_over() or self.board.can_claim_draw() or self.num_pieces() <= 5:  # replace with a direct syzygy probe?
+        if self.board.is_game_over() or self.board.can_claim_draw():
             self._game_over()
-
-        return self.board, {}
 
     def _game_over(self):
         self.done = True
         result = self.board.result()
         if result == '1/2-1/2' or self.board.can_claim_draw():
             self.winner = Winner.DRAW
-        elif self.board.is_game_over():
-            self.winner = Winner.WHITE if result == '1-0' else Winner.BLACK
         else:
-            probe = 0
-            with chess.syzygy.open_tablebases(self.syzygy_dir) as tablebases:
-                probe = tablebases.probe_wdl(self.board)
-            if probe >= 2:
-                self.winner = Winner.WHITE if self.board.turn == chess.WHITE else Winner.BLACK
-            elif probe <= -2:
-                self.winner = Winner.BLACK if self.board.turn == chess.WHITE else Winner.WHITE
-            else:
-                self.winner = Winner.DRAW
+            self.winner = Winner.WHITE if result == '1-0' else Winner.BLACK
 
 
     def absolute_eval(self, relative_eval):
         return relative_eval if self.board.turn == chess.WHITE else -relative_eval
 
     def _resigned(self):
-        self._win_other_player()
+        self.winner = Winner.BLACK if self.board.turn == chess.WHITE else Winner.WHITE
         self.done = True
         self.resigned = True
-
-    def _win_other_player(self):
-        self.winner = Winner.BLACK if self.board.turn == chess.WHITE else Winner.WHITE
 
     def num_pieces(self):
         board_state = self.replace_tags()
@@ -127,3 +106,7 @@ class ChessEnv:
     @property
     def observation(self):
         return self.board.fen()
+
+    @property
+    def turn(self):
+        return self.board.fullmove_number

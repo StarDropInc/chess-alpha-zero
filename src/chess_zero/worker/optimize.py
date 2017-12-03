@@ -180,7 +180,7 @@ class OptimizeWorker:
         policy_list = []
         z_list = []
         for state, policy, z in data:
-            env = ChessEnv().update(state)  # no syzygy_dir need be passed here; as the method is static (but why?) none could be.
+            env = ChessEnv().update(state)
 
             white_ary, black_ary = env.white_and_black_plane()
             state = [white_ary, black_ary] if env.board.turn == chess.WHITE else [black_ary, white_ary]

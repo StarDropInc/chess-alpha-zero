@@ -13,7 +13,7 @@ def start(config: Config):
     PlayWithHumanConfig().update_play_config(config.play)
     chess_model = PlayWithHuman(config)
 
-    env = ChessEnv(config.resource.syzygy_dir).reset()
+    env = ChessEnv().reset()
     human_is_black = random() < 0.5
     chess_model.start_game(human_is_black)
 
@@ -24,7 +24,7 @@ def start(config: Config):
         else:
             action = chess_model.move_by_ai(env)
             print("AI moves to: " + action)
-        board, info = env.step(action)
+        board = env.step(action)
         env.render()
         print("Board FEN = " + board.fen())
 
