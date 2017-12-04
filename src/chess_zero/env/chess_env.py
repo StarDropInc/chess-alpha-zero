@@ -4,6 +4,7 @@ import chess.syzygy
 import numpy as np
 
 from logging import getLogger
+import random
 
 logger = getLogger(__name__)
 
@@ -30,6 +31,24 @@ class ChessEnv:
         self.done = False
         self.winner = None
         self.resigned = False
+        return self
+
+    def randomize(self, num):  # generates a random position with _num_ pieces on the board. used to generate training data (with tablebase)
+        self.board = chess.Board.empty()
+        self.done = False
+        self.winner = None
+        self.resigned = False
+
+        squares = random.sample(range(0, 64), num)
+        self.board.set_piece_at(squares[0], chess.Piece(6, chess.WHITE))
+        self.board.set_piece_at(squares[1], chess.Piece(6, chess.BLACK))
+        self.board.set_piece_at(squares[2], chess.Piece(random.randrange(1, 6), random.random() < 0.5))
+        self.board.set_piece_at(squares[3], chess.Piece(random.randrange(1, 6), random.random() < 0.5))
+        self.board.set_piece_at(squares[4], chess.Piece(random.randrange(1, 6), random.random() < 0.5))
+
+        if not self.board.is_valid() or self.board.is_game_over():  # possible if the randomly generated position is a (stale)mate! note: could replace with setting self.done appropriately.
+            return self.randomize(num)
+
         return self
 
     def step(self, action):
@@ -67,7 +86,7 @@ class ChessEnv:
         board_state = self.replace_tags()
         return len([val for val in board_state.split(" ")[0] if val != "1"])
 
-    def white_and_black_plane(self):
+    def white_and_black_planes(self):
         board_state = self.replace_tags()
 
         one_hot = {}

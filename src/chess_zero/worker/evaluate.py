@@ -64,6 +64,7 @@ class EvaluateWorker:
 
     def play_game(self, best_model, ng_model):
         env = ChessEnv().reset()
+        # env = ChessEnv().randomize(7)
 
         ng_player = ChessPlayer(self.config, ng_model, play_config=self.config.eval.play_config)
         best_player = ChessPlayer(self.config, best_model, play_config=self.config.eval.play_config)

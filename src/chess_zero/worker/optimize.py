@@ -62,9 +62,7 @@ class OptimizeWorker:
     def train_epoch(self, epochs):
         tc = self.config.trainer
         state_ary, policy_ary, z_ary = self.dataset
-        self.model.model.fit(state_ary, [policy_ary, z_ary],
-                             batch_size=tc.batch_size,
-                             epochs=epochs)
+        self.model.model.fit(state_ary, [policy_ary, z_ary], batch_size=tc.batch_size, epochs=epochs)
         steps = (state_ary.shape[0] // tc.batch_size) * epochs
         return steps
 
@@ -100,15 +98,15 @@ class OptimizeWorker:
         self.model.save(config_path, weight_path)
 
     def collect_all_loaded_data(self):
-        state_ary_list, policy_ary_list, z_ary_list = [], [], []
-        for s_ary, p_ary, z_ary_ in self.loaded_data.values():
+        state_ary_list, policy_ary_list, value_ary_list = [], [], []
+        for s_ary, p_ary, v_ary in self.loaded_data.values():
             state_ary_list.append(s_ary)
             policy_ary_list.append(p_ary)
-            z_ary_list.append(z_ary_)
+            value_ary_list.append(v_ary)
         state_ary = np.concatenate(state_ary_list)
         policy_ary = np.concatenate(policy_ary_list)
-        z_ary = np.concatenate(z_ary_list)
-        return state_ary, policy_ary, z_ary
+        value_ary = np.concatenate(value_ary_list)
+        return state_ary, policy_ary, value_ary
 
     @property
     def dataset_size(self):
@@ -178,15 +176,15 @@ class OptimizeWorker:
         """
         state_list = []
         policy_list = []
-        z_list = []
-        for state, policy, z in data:
+        value_list = []
+        for state, policy, value in data:
             env = ChessEnv().update(state)
 
-            white_ary, black_ary = env.white_and_black_plane()
+            white_ary, black_ary = env.white_and_black_planes()
             state = [white_ary, black_ary] if env.board.turn == chess.WHITE else [black_ary, white_ary]
             state = np.reshape(np.array(state), (12, 8, 8))
             state_list.append(state)
             policy_list.append(policy)
-            z_list.append(z)
+            value_list.append(value)
 
-        return np.array(state_list), np.array(policy_list), np.array(z_list)
+        return np.array(state_list), np.array(policy_list), np.array(value_list)

@@ -168,7 +168,7 @@ class ChessPlayer:
         key = self.counter_key(env)
         self.now_expanding.add(key)
 
-        white_ary, black_ary = env.white_and_black_plane()
+        white_ary, black_ary = env.white_and_black_planes()
         state = [white_ary, black_ary] if env.board.turn == chess.WHITE else [black_ary, white_ary]
         future = await self.predict(np.reshape(np.array(state), (12, 8, 8)))  # type: Future
 
@@ -279,9 +279,8 @@ class ChessPlayer:
         xx_ = max(xx_, 1)  # avoid u_=0 if N is all 0
         p_ = self.var_p[key]
 
-        if is_root_node:  # Is it correct?? -> (1-e)p + e*Dir(0.03)
-            p_ = (1 - self.play_config.noise_eps) * p_ + \
-                 self.play_config.noise_eps * np.random.dirichlet([self.play_config.dirichlet_alpha] * self.labels_n)
+        if is_root_node:  # Is it correct? -> (1-e)p + e*Dir(0.03)
+            p_ = (1 - self.play_config.noise_eps) * p_ + self.play_config.noise_eps * np.random.dirichlet([self.play_config.dirichlet_alpha] * self.labels_n)
 
         u_ = self.play_config.c_puct * p_ * xx_ / (1 + self.var_n[key])
         if env.board.turn == chess.WHITE:
