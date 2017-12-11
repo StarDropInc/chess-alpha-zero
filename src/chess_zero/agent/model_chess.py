@@ -9,7 +9,6 @@ import keras.backend as k
 
 from keras.engine.topology import Input
 from keras.engine.training import Model
-from keras.layers import Embedding  # correct import...?
 from keras.layers.convolutional import Conv2D
 from keras.layers.core import Activation, Dense, Flatten
 from keras.layers.merge import Add

@@ -12,7 +12,7 @@ class EvaluateConfig:
 
 class PlayDataConfig:
     def __init__(self):
-        self.nb_game_in_file = 100  # 100
+        self.nb_game_in_file = 20  # 100
         self.max_file_num = 100  # 10
 
 

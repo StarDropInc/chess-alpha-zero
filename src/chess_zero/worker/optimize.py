@@ -64,8 +64,8 @@ class OptimizeWorker:
     def train_epoch(self, epochs):
         tc = self.config.trainer
         state_ary, policy_ary, value_ary = self.dataset
-        tensorboard = TensorBoard(log_dir=os.path.join(self.config.resource.log_dir, str(time())), histogram_freq=32, batch_size=32, write_graph=True, write_grads=True, write_images=True, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None)
-        self.model.model.fit(state_ary, [policy_ary, value_ary], batch_size=tc.batch_size, epochs=epochs, callbacks=[tensorboard])
+        # tensorboard = TensorBoard(log_dir=os.path.join(self.config.resource.log_dir, str(time())), histogram_freq=0, batch_size=32, write_graph=True, write_grads=True, write_images=True, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None)
+        self.model.model.fit(state_ary, [policy_ary, value_ary], batch_size=tc.batch_size, epochs=epochs)  # ..., callbacks=[tensorboard])
         steps = (state_ary.shape[0] // tc.batch_size) * epochs
         return steps
 

@@ -158,6 +158,9 @@ class MyBoard(Board):
     def __init__(self, fen=STARTING_FEN):
         Board.__init__(self, fen)
 
+    def __str__(self):
+        return self.unicode()
+
     def transposition_key(self):  # this feels slightly less egregious than accessing the private method from a completely foreign class.
         return self._transposition_key()
 

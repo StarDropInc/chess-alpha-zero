@@ -305,7 +305,7 @@ class ChessPlayer:
 
     def select_action_syzygy(self, env):
         key = env.transposition_key
-        legal_moves, _ = self.var_moves[key]  # node has already been expanded and evaluated before this routine is called.
+        legal_moves, _ = self.var_moves[key]  # node has already been (syzygied) and evaluated before this routine is called.
 
         with chess.syzygy.open_tablebases(self.config.resource.syzygy_dir) as tablebases:
             violent_wins = {}
