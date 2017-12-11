@@ -3,17 +3,16 @@ class EvaluateConfig:
         self.game_num = 10
         self.replace_rate = 0.55
         self.play_config = PlayConfig()
-        self.play_config.simulation_num_per_move = 50
-        self.play_config.thinking_loop = 1
+        self.play_config.simulation_num_per_move = 10
         self.play_config.c_puct = 1
         self.play_config.change_tau_turn = 0
         self.play_config.noise_eps = 0
-        self.evaluate_latest_first = True
+        self.play_config.syzygy_access = False
 
 
 class PlayDataConfig:
     def __init__(self):
-        self.nb_game_in_file = 20
+        self.nb_game_in_file = 10
         self.max_file_num = 10
 
 
@@ -24,7 +23,7 @@ class PlayConfig:
         self.logging_thinking = False
         self.c_puct = 5
         self.noise_eps = 0.25
-        self.dirichlet_alpha = 0.03
+        self.dirichlet_alpha = 0.3
         self.change_tau_turn = 10
         self.virtual_loss = 3
         self.prediction_queue_size = 16
@@ -33,6 +32,7 @@ class PlayConfig:
         self.wait_for_expanding_sleep_sec = 0.000001
         self.resign_threshold = None
         self.min_resign_turn = 5
+        self.syzygy_access = True
 
 
 class TrainerConfig:
@@ -42,12 +42,15 @@ class TrainerConfig:
         self.start_total_steps = 0
         self.save_model_steps = 1000
         self.load_data_steps = 1000
+        self.min_data_size_to_learn = 1000
 
 
 class ModelConfig:
-    cnn_filter_num = 16
-    cnn_filter_size = 3
-    res_layer_num = 1
-    l2_reg = 1e-4
-    value_fc_size = 16
-    distributed = False
+    def __init__(self):  # not sure why all the below variables were static. changed.
+        self.cnn_filter_num = 16
+        self.cnn_filter_size = 3
+        self.res_layer_num = 1
+        self.l2_reg = 1e-4
+        self.value_fc_size = 16
+        self.t_history = 1
+        self.input_stack_height = 7 + self.t_history*14

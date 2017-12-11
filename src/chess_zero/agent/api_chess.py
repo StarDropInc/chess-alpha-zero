@@ -8,10 +8,11 @@ class ChessModelAPI:
 
     def predict(self, x):
         assert x.ndim in (3, 4)
-        assert x.shape == (12, 8, 8) or x.shape[1:] == (12, 8, 8)
+        input_stack_height = self.config.model.input_stack_height
+        assert x.shape == (input_stack_height, 8, 8) or x.shape[1:] == (input_stack_height, 8, 8)  # should I get rid of these assertions...? they will change.
         orig_x = x
         if x.ndim == 3:
-            x = x.reshape(1, 12, 8, 8)
+            x = x.reshape(1, input_stack_height, 8, 8)
         policy, value = self.agent_model.model.predict_on_batch(x)
 
         if orig_x.ndim == 3:

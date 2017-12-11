@@ -3,7 +3,7 @@ from logging import getLogger
 from chess_zero.agent.player_chess import HistoryItem
 from chess_zero.agent.player_chess import ChessPlayer
 from chess_zero.config import Config
-from chess_zero.lib.model_helper import load_best_model_weight
+from chess_zero.lib.model_helper import load_newest_model_weight
 import chess
 
 logger = getLogger(__name__)
@@ -26,14 +26,14 @@ class PlayWithHuman:
     def _load_model(self):
         from chess_zero.agent.model_chess import ChessModel
         model = ChessModel(self.config)
-        if not load_best_model_weight(model):
-            raise RuntimeError("Best model not found!")
+        if not load_newest_model_weight(model):
+            raise RuntimeError("newest model not found!")
         return model
 
     def move_by_ai(self, env):
-        action = self.ai.action(env.observation)
+        action = self.ai.action(env.fen)
 
-        self.last_history = self.ai.ask_thought_about(env.observation)
+        self.last_history = self.ai.ask_thought_about(env.fen)
         self.last_evaluation = self.last_history.values[self.last_history.action]
         logger.debug(f"Evaluation by AI = {self.last_evaluation}")
 

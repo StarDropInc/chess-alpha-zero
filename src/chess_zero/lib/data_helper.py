@@ -14,11 +14,15 @@ def get_game_data_filenames(rc: ResourceConfig):
     return files
 
 
-def get_next_generation_model_dirs(rc: ResourceConfig):
-    dir_pattern = os.path.join(rc.next_generation_model_dir, rc.next_generation_model_dirname_tmpl % "*")
+def get_newest_model_dirs(rc: ResourceConfig):  # should be only one of these!
+    dir_pattern = os.path.join(rc.model_dir, rc.model_dirname_tmpl % "*")
     dirs = list(sorted(glob(dir_pattern)))
     return dirs
 
+def get_old_model_dirs(rc: ResourceConfig):
+    dir_pattern = os.path.join(rc.old_model_dir, rc.model_dirname_tmpl % "*")
+    dirs = list(sorted(glob(dir_pattern)))
+    return dirs
 
 def write_game_data_to_file(path, data):
     with open(path, "wt") as f:

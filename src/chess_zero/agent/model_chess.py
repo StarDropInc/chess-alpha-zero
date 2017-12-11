@@ -9,6 +9,7 @@ import keras.backend as k
 
 from keras.engine.topology import Input
 from keras.engine.training import Model
+from keras.layers import Embedding  # correct import...?
 from keras.layers.convolutional import Conv2D
 from keras.layers.core import Activation, Dense, Flatten
 from keras.layers.merge import Add
@@ -29,10 +30,9 @@ class ChessModel:
 
     def build(self):
         mc = self.config.model
-        in_x = x = Input((12, 8, 8))  # [own(8x8), enemy(8x8)]
-
+        in_x = x = Input((mc.input_stack_height, 8, 8))
         # (batch, channels, height, width)
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(x)
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_regularizer=l2(mc.l2_reg), input_shape=(mc.input_stack_height, 8, 8))(x)
         x = BatchNormalization(axis=1)(x)
         x = Activation("relu")(x)
 
@@ -53,7 +53,7 @@ class ChessModel:
         x = BatchNormalization(axis=1)(x)
         x = Activation("relu")(x)
         x = Flatten()(x)
-        x = Dense(mc.value_fc_size, kernel_regularizer=l2(mc.l2_reg), activation="relu")(x)
+        x = Dense(mc.value_fc_size, kernel_regularizer=l2(mc.l2_reg), activation="softmax")(x)  # KEY: changed activation from "relu".
         value_out = Dense(1, kernel_regularizer=l2(mc.l2_reg), activation="tanh", name="value_out")(x)
 
         self.model = Model(in_x, [policy_out, value_out], name="chess_model")
@@ -61,12 +61,10 @@ class ChessModel:
     def _build_residual_block(self, x):
         mc = self.config.model
         in_x = x
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same",
-                   data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(x)
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(x)
         x = BatchNormalization(axis=1)(x)
         x = Activation("relu")(x)
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same",
-                   data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(x)
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(x)
         x = BatchNormalization(axis=1)(x)
         x = Add()([in_x, x])
         x = Activation("relu")(x)
@@ -81,19 +79,6 @@ class ChessModel:
             return m.hexdigest()
 
     def load(self, config_path, weight_path):
-        mc = self.config.model
-        resources = self.config.resource
-        if mc.distributed and config_path == resources.model_best_config_path:
-            try:
-                logger.debug(f"loading model from server")
-                ftp_connection = ftplib.FTP(resources.model_best_distributed_ftp_server, resources.model_best_distributed_ftp_user, resources.model_best_distributed_ftp_password)
-                ftp_connection.cwd(resources.model_best_distributed_ftp_remote_path)
-                ftp_connection.retrbinary("RETR model_best_config.json", open(config_path, 'wb').write)
-                ftp_connection.retrbinary("RETR model_best_weight.h5", open(weight_path, 'wb').write)
-                ftp_connection.quit()
-            except:
-                pass
-
         if os.path.exists(config_path) and os.path.exists(weight_path):
             logger.debug(f"loading model from {config_path}")
             with open(config_path, "rt") as f:
@@ -103,7 +88,7 @@ class ChessModel:
             logger.debug(f"loaded model digest = {self.digest}")
             return True
         else:
-            logger.debug(f"model files does not exist at {config_path} and {weight_path}")
+            logger.debug(f"model files do not exist at {config_path} and {weight_path}")
             return False
 
     def save(self, config_path, weight_path):
@@ -113,25 +98,6 @@ class ChessModel:
             self.model.save_weights(weight_path)
         self.digest = self.fetch_digest(weight_path)
         logger.debug(f"saved model digest {self.digest}")
-
-        mc = self.config.model
-        resources = self.config.resource
-        if mc.distributed and config_path == resources.model_best_config_path:
-            try:
-                logger.debug(f"saving model to server")
-                ftp_connection = ftplib.FTP(resources.model_best_distributed_ftp_server, resources.model_best_distributed_ftp_user, resources.model_best_distributed_ftp_password)
-                ftp_connection.cwd(resources.model_best_distributed_ftp_remote_path)
-                fh = open(config_path, 'rb')
-                ftp_connection.storbinary('STOR model_best_config.json', fh)
-                fh.close()
-
-                fh = open(weight_path, 'rb')
-                ftp_connection.storbinary('STOR model_best_weight.h5', fh)
-                fh.close()
-                ftp_connection.quit()
-            except:
-                pass
-
 
 def objective_function_for_policy(y_true, y_pred):
     # can use categorical_crossentropy??
