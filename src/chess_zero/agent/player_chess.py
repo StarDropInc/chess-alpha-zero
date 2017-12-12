@@ -9,7 +9,6 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 from profilehooks import profile
 
 import time
-
 import numpy as np
 import chess
 
@@ -50,23 +49,22 @@ class ChessPlayer:
 
         self.thinking_history = {}  # for fun
 
-    def action(self, fen):
-        env = ChessEnv().update(fen)
+    def action(self, env):
         key = env.transposition_key
 
         for tl in range(self.play_config.thinking_loop):
             if tl > 0 and self.play_config.logging_thinking:
                 logger.debug(f"continue thinking: policy move=({action % 8}, {action // 8}), value move=({action_by_value % 8}, {action_by_value // 8})")
             if self.play_config.syzygy_access and env.num_pieces() <= 5:  # syzygy takes over at this point, to generate training data of optimal quality.
-                legal_moves = env.board.legal_moves  # a hack. replicating the contents of _hash_moves
+                legal_moves = env.board.legal_moves  # a temporary hack. replicating the contents of _hash_moves (there are issues with calling an async from a sync).
                 # logger.debug(legal_moves)
                 legal_labels = np.zeros(self.n_labels)
                 legal_labels[[self.labels[move] for move in legal_moves]] = 1
-                self.var_moves[key] = (legal_moves, legal_labels)
-                policy = self.syzygy_policy(fen)  # note: in the essentially impossible situation under which num_pieces <= 5 before the change_tau_turn move, this will violate the temperature...
+                self.var_moves[key] = legal_moves, legal_labels
+                policy = self.syzygy_policy(env)  # note: in the essentially impossible situation under which num_pieces <= 5 before the change_tau_turn move, this will violate the temperature...
             else:
-                self.search_moves(fen)
-                policy = self.calc_policy(fen)
+                self.search_moves(env)  # this should leave env invariant!
+                policy = self.calc_policy(env)
             action = int(np.random.choice(range(self.n_labels), p=policy))
             action_by_value = int(np.argmax(self.var_q[key] + (self.var_n[key] > 0)*100))  # what is the point of action_by_value?
             if action == action_by_value or env.fullmove_number < self.play_config.change_tau_turn:
@@ -94,14 +92,14 @@ class ChessPlayer:
         return last_evaluation
 
     @profile
-    def search_moves(self, fen):
+    def search_moves(self, env):
         start = time.time()
         loop = self.loop
         self.running_simulation_num = 0
 
         coroutine_list = []
         for it in range(self.play_config.simulation_num_per_move):
-            cor = self.start_search_my_move(fen)
+            cor = self.start_search_my_move(env)
             coroutine_list.append(cor)
 
         coroutine_list.append(self.prediction_worker())
@@ -110,12 +108,12 @@ class ChessPlayer:
         # uncomment to see profile result per move
         # raise
 
-    async def start_search_my_move(self, fen):
+    async def start_search_my_move(self, env):
         self.running_simulation_num += 1
         with await self.sem:  # reduce parallel search number
-            env = ChessEnv().update(fen)  # creating a new env from scratch is absolutely necessary here.
-            leaf_v = await self.search_my_move(env, is_root_node=True)
-            # not sure how this is different from _search_my_move_ _not_ being async and calling it directly. perhaps the controller can juggle it to a different thread.
+            my_env = env.copy()  # use this option to preserve history... but it's slow...!
+            # my_env = ChessEnv(self.config).update(env.fen)
+            leaf_v = await self.search_my_move(my_env, is_root_node=True)
             self.running_simulation_num -= 1
             return leaf_v  # it would appear that this return has no purpose.
 
@@ -189,7 +187,7 @@ class ChessPlayer:
 
         legal_moves, legal_labels = await self._hash_moves(env)
         leaf_p = leaf_p * legal_labels  # mask policy vector and renormalize.
-        leaf_p /= sum(leaf_p)
+        leaf_p = leaf_p / sum(leaf_p) if sum(leaf_p) > 0 else leaf_p
         self.var_p[key] = leaf_p
 
         self.expanded.add(key)
@@ -220,7 +218,7 @@ class ChessPlayer:
         # logger.debug(legal_moves)
         legal_labels = np.zeros(self.n_labels)
         legal_labels[[self.labels[move] for move in legal_moves]] = 1
-        self.var_moves[key] = (legal_moves, legal_labels)
+        self.var_moves[key] = legal_moves, legal_labels
         return legal_moves, legal_labels
 
     async def prediction_worker(self):
@@ -259,12 +257,11 @@ class ChessPlayer:
         for move in self.moves:  # add this game winner result to all past moves.
             move += [z]
 
-    def calc_policy(self, fen):  # should (hopefully) be safe to hash the env _after_ reconstituting it from a FEN...
+    def calc_policy(self, env):  # should (hopefully) be safe to hash the env _after_ reconstituting it from a FEN...
         """calc π(a|s0)
         :return:
         """
         pc = self.play_config
-        env = ChessEnv().update(fen)
         key = env.transposition_key
         if env.fullmove_number < pc.change_tau_turn:
             return self.var_n[key] / (np.sum(self.var_n[key])+1e-8)  # tau = 1
@@ -274,8 +271,7 @@ class ChessPlayer:
             ret[action] = 1
             return ret
 
-    def syzygy_policy(self, fen):
-        env = ChessEnv().update(fen)
+    def syzygy_policy(self, env):
         action, _ = self.select_action_syzygy(env)
         ret = np.zeros(self.n_labels)
         ret[action] = 1
@@ -296,7 +292,7 @@ class ChessPlayer:
         u_ = self.play_config.c_puct * p_ * xx_ / (1 + self.var_n[key])
 
         v_ = ((1 if env.board.turn == chess.WHITE else -1) * self.var_q[key] + u_ + 1000) * legal_labels
-        # under extreme bad luck, the vector p_, and thus u_, could become entirely negative after dirichlet noise. need argmaxing _legal_ index, even if negative...
+        # under extreme bad luck, the vector p_, and thus u_, could become entirely negative after dirichlet noise. need the argmaxing _legal_ index, even if negative...
 
         # noinspection PyTypeChecker
         action_t = int(np.argmax(v_))

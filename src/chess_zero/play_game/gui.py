@@ -13,7 +13,7 @@ def start(config: Config):
     PlayWithHumanConfig().update_play_config(config.play)
     chess_model = PlayWithHuman(config)
 
-    env = ChessEnv().reset()
+    env = ChessEnv(config).reset()
     human_is_black = random() < 0.5
     chess_model.start_game(human_is_black)
 

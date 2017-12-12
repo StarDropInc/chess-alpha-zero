@@ -7,8 +7,10 @@ from logging import getLogger
 import random
 import collections
 import chess.syzygy
+import copy
 from chess import Board
 from chess import STARTING_FEN
+from chess_zero.config import Config
 
 logger = getLogger(__name__)
 
@@ -17,7 +19,8 @@ Winner = enum.Enum("Winner", "WHITE BLACK DRAW")
 
 
 class ChessEnv:
-    def __init__(self):
+    def __init__(self, config: Config):
+        self.config = config
         self.board = None
         self.done = False
         self.winner = None  # type: Winner
@@ -75,18 +78,21 @@ class ChessEnv:
         :return:
         """
         if action == chess.Move.null():
-            self._resigned()
+            self._resign()
             return
 
         self.board.push(action)
 
-        if self.board.is_game_over() or self.board.can_claim_draw():
-            self._game_over()
+        if self._is_game_over():
+            self._conclude_game()
 
-    def _game_over(self):
+    def _is_game_over(self):
+        return self.board.is_game_over() or self.board.can_claim_draw() or self.fullmove_number > self.config.play.automatic_draw_turn
+
+    def _conclude_game(self):
         self.done = True
         result = self.board.result()
-        if result == '1/2-1/2' or self.board.can_claim_draw():
+        if result == '1/2-1/2' or self.board.can_claim_draw() or self.fullmove_number > self.config.play.automatic_draw_turn:
             self.winner = Winner.DRAW
         else:
             self.winner = Winner.WHITE if result == '1-0' else Winner.BLACK
@@ -94,7 +100,7 @@ class ChessEnv:
     def absolute_eval(self, relative_eval):
         return relative_eval if self.board.turn == chess.WHITE else -relative_eval
 
-    def _resigned(self):
+    def _resign(self):
         self.winner = Winner.BLACK if self.board.turn == chess.WHITE else Winner.WHITE
         self.done = True
         self.resigned = True
@@ -116,15 +122,14 @@ class ChessEnv:
 
     def _recursive_append(self, stack, depth, side):
         if depth > 0:
-            (move, fresh, fen) = chess.Move.null(), False, None
+            move, fen = chess.Move.null(), None
             if self.board.move_stack:  # there are still moves to pop.
                 move = self.board.pop()
             elif self.board.is_valid():  # no more moves left, but still valid. we'll clear the board now
-                fresh = True
                 fen = self.board.fen()
                 self.board.clear()
             self._recursive_append(stack, depth - 1, side)
-            if fresh:
+            if fen:
                 self.board.set_fen(fen)
             else:
                 self.board.push(move)
@@ -139,6 +144,11 @@ class ChessEnv:
         board_own = [self._one_hot(self.board.piece_at(idx), side) for idx in range(64)]
         board_own = np.transpose(np.reshape(board_own, (8, 8, 6)), (2, 0, 1))
         stack.append(np.flip(board_own, 1) if side else np.flip(board_own, 2))
+
+    def copy(self):
+        env = copy.copy(self)
+        env.board = copy.copy(self.board)
+        return env
 
     @property
     def fen(self):

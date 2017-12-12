@@ -151,7 +151,7 @@ class OptimizeWorker:
         if filename in self.loaded_data:
             del self.loaded_data[filename]
 
-    def convert_to_training_data(self, data):  # this method is no longer static.
+    def convert_to_training_data(self, data):
         """
 
         :param data: format is SelfPlayWorker.buffer
@@ -160,10 +160,21 @@ class OptimizeWorker:
         state_list = []
         policy_list = []
         value_list = []
-        for state, policy, value in data:
-            env = ChessEnv().update(state)
 
-            state = env.gather_features(self.config.model.t_history)
+        history = [np.zeros((14, 8, 8)) for _ in range(self.config.model.t_history)]
+        aux_move_number = 1
+        for state, policy, value in data:
+            env = ChessEnv(self.config).update(state)
+            features = env.gather_features(1)
+            move_number = int(state.split(" ")[5])
+            if aux_move_number <= move_number:  # this could break if a "game" is less than or equal to two moves long! (FEN only conveys fullmove.)
+                history.pop(0)
+            else:
+                history = [np.zeros((14, 8, 8)) for _ in range(self.config.model.t_history - 1)]
+            history.append(features[7:])
+            aux_move_number = move_number
+
+            state = np.concatenate((features[:7], np.concatenate(history)))
             state_list.append(state)
             policy_list.append(policy)
             value_list.append(value)
