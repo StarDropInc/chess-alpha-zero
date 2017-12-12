@@ -74,7 +74,7 @@ class EvaluateWorker:
 
         while not env.done:
             ai = newest_player if newest_is_white == (env.board.turn == chess.WHITE) else old_player
-            action = ai.action(env.fen)
+            action = ai.action(env)
             env.step(action)
 
         newest_win = None

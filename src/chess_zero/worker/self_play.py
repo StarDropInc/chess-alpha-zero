@@ -14,7 +14,7 @@ logger = getLogger(__name__)
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.1)
+    tf_util.set_session_config(per_process_gpu_memory_fraction=0.3)
     return SelfPlayWorker(config, env=ChessEnv(config)).start()
 
 
