@@ -35,13 +35,13 @@ class ChessPlayer:
         self.var_n = defaultdict(lambda: np.zeros((self.n_labels,)))
         self.var_w = defaultdict(lambda: np.zeros((self.n_labels,)))
         self.var_q = defaultdict(lambda: np.zeros((self.n_labels,)))
-        self.var_u = defaultdict(lambda: np.zeros((self.n_labels,)))
         self.var_p = defaultdict(lambda: np.zeros((self.n_labels,)))
         self.var_moves = {}  # dict storing the legal moves for each position.
         self.expanded = set()
         self.now_expanding = set()
         self.prediction_queue = Queue(self.play_config.prediction_queue_size)
         self.sem = asyncio.Semaphore(self.play_config.parallel_search_num)
+        self.tablebases = chess.syzygy.open_tablebases(self.config.resource.syzygy_dir)
 
         self.moves = []
         self.loop = asyncio.get_event_loop()
@@ -50,12 +50,12 @@ class ChessPlayer:
         self.thinking_history = {}  # for fun
 
     def action(self, env):
-        key = env.transposition_key
+        key = env.transposition_key()
 
         for tl in range(self.play_config.thinking_loop):
             if tl > 0 and self.play_config.logging_thinking:
                 logger.debug(f"continue thinking: policy move=({action % 8}, {action // 8}), value move=({action_by_value % 8}, {action_by_value // 8})")
-            if self.play_config.syzygy_access and env.num_pieces() <= 5:  # syzygy takes over at this point, to generate training data of optimal quality.
+            if self.play_config.syzygy_access and env.board.num_pieces() <= 5:  # syzygy takes over at this point, to generate training data of optimal quality.
                 legal_moves = env.board.legal_moves  # a temporary hack. replicating the contents of _hash_moves (there are issues with calling an async from a sync).
                 # logger.debug(legal_moves)
                 legal_labels = np.zeros(self.n_labels)
@@ -126,7 +126,7 @@ class ChessPlayer:
         :param is_root_node:
         :return:
         """
-        if env.done:  # should this be replaced by returning its original leaf_v...?!
+        if env.done:  # should an MCTS worker even have access to mate info...?
             if env.winner == Winner.WHITE:
                 return 1
             elif env.winner == Winner.BLACK:
@@ -134,9 +134,9 @@ class ChessPlayer:
             else:
                 return 0
 
-        key = env.transposition_key
+        key = env.transposition_key()
 
-        if self.play_config.syzygy_access and env.num_pieces() <= 5:  # syzygy bases can guide the internal MCTS search as well, not just the high-level moves.
+        if self.play_config.syzygy_access and env.board.num_pieces() <= 5:  # syzygy bases can guide the internal MCTS search as well, not just the high-level moves.
             while key in self.now_expanding:
                 await asyncio.sleep(self.config.play.wait_for_expanding_sleep_sec)
             if key not in self.expanded:
@@ -160,7 +160,7 @@ class ChessPlayer:
         leaf_v = await self.search_my_move(env)  # next move
 
         # on returning search path
-        # update: N, W, Q, U
+        # update: N, W, Q
         n = self.var_n[key][action_t] = self.var_n[key][action_t] - virtual_loss + 1
         w = self.var_w[key][action_t] = self.var_w[key][action_t] + virtual_loss + leaf_v
         self.var_q[key][action_t] = w / n
@@ -176,10 +176,10 @@ class ChessPlayer:
         :param ChessEnv env:
         :return: leaf_v
         """
-        key = env.transposition_key
+        key = env.transposition_key()
         self.now_expanding.add(key)
 
-        state = env.gather_features(self.config.model.t_history)
+        state = env.board.gather_features(self.config.model.t_history)
         future = await self.predict(state)  # type: Future
 
         await future
@@ -195,11 +195,10 @@ class ChessPlayer:
         return float(leaf_v)
 
     async def syzygy_and_evaluate(self, env):
-        key = env.transposition_key
+        key = env.transposition_key()
         self.now_expanding.add(key)
 
-        with chess.syzygy.open_tablebases(self.config.resource.syzygy_dir) as tablebases:
-            wdl = tablebases.probe_wdl(env.board)
+        wdl = self.tablebases.probe_wdl(env.board)
         if wdl == 2:
             leaf_v = 1
         elif wdl == -2:
@@ -213,7 +212,7 @@ class ChessPlayer:
         return float(leaf_v)
 
     async def _hash_moves(self, env):
-        key = env.transposition_key
+        key = env.transposition_key()
         legal_moves = env.board.legal_moves
         # logger.debug(legal_moves)
         legal_labels = np.zeros(self.n_labels)
@@ -262,7 +261,7 @@ class ChessPlayer:
         :return:
         """
         pc = self.play_config
-        key = env.transposition_key
+        key = env.transposition_key()
         if env.fullmove_number < pc.change_tau_turn:
             return self.var_n[key] / (np.sum(self.var_n[key])+1e-8)  # tau = 1
         else:
@@ -278,12 +277,12 @@ class ChessPlayer:
         return ret
 
     def select_action_q_and_u(self, env, is_root_node):  # now returns a chess.Move, as opposed to an index
-        key = env.transposition_key
+        key = env.transposition_key()
         legal_moves, legal_labels = self.var_moves[key]  # node has already been expanded and evaluated before this routine is called.
 
         # noinspection PyUnresolvedReferences
         xx_ = np.sqrt(np.sum(self.var_n[key]))  # SQRT of sum(N(s, b); for all b)
-        xx_ = max(xx_, 1)  # avoid u_=0 if N is all 0
+        xx_ += 1  # avoid u_=0 if N is all 0  # WAS max(xx_, 1)... avoid a discontinuity...!
         p_ = self.var_p[key]
 
         if is_root_node:  # Is it correct? -> (1-e)p + e*Dir(0.03)
@@ -300,25 +299,24 @@ class ChessPlayer:
         return action_t, move_t
 
     def select_action_syzygy(self, env):
-        key = env.transposition_key
+        key = env.transposition_key()
         legal_moves, _ = self.var_moves[key]  # node has already been (syzygied) and evaluated before this routine is called.
 
-        with chess.syzygy.open_tablebases(self.config.resource.syzygy_dir) as tablebases:
-            violent_wins = {}
-            quiets_and_draws = {}
-            violent_losses = {}
-            for move in legal_moves:  # note: node probably _hasn't_ been expanded. this move generation could probably be stored, but...
-                is_zeroing = env.board.is_zeroing(move)
-                env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the syzygy bases. but gaviota are much larger...
-                dtz = tablebases.probe_dtz(env.board)  # casting to float isn't necessary; is coerced below upon comparison to 0.0
-                value = 1/dtz if dtz != 0.0 else 0.0  # a trick: fast mated < slow mated < draw < slow mate < fast mate
-                if is_zeroing and value < 0:
-                    violent_wins[move] = value
-                elif not is_zeroing or value == 0:
-                    quiets_and_draws[move] = value
-                elif is_zeroing and value > 0:
-                    violent_losses[move] = value
-                env.board.pop()
+        violent_wins = {}
+        quiets_and_draws = {}
+        violent_losses = {}
+        for move in legal_moves:  # note: node probably _hasn't_ been expanded. this move generation could probably be stored, but...
+            is_zeroing = env.board.is_zeroing(move)
+            env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the syzygy bases. but gaviota are much larger...
+            dtz = self.tablebases.probe_dtz(env.board)  # casting to float isn't necessary; is coerced below upon comparison to 0.0
+            value = 1/dtz if dtz != 0.0 else 0.0  # a trick: fast mated < slow mated < draw < slow mate < fast mate
+            if is_zeroing and value < 0:
+                violent_wins[move] = value
+            elif not is_zeroing or value == 0:
+                quiets_and_draws[move] = value
+            elif is_zeroing and value > 0:
+                violent_losses[move] = value
+            env.board.pop()
         if violent_wins:
             move_t = min(violent_wins, key=violent_wins.get)
         elif quiets_and_draws:

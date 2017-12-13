@@ -15,18 +15,19 @@ logger = getLogger(__name__)
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.1)
-    return EvaluateWorker(config).start()
+    tf_util.set_session_config(per_process_gpu_memory_fraction=0.2)
+    return EvaluateWorker(config, env=ChessEnv(config)).start()
 
 
 class EvaluateWorker:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, env=None):
         """
 
         :param config:
         """
         self.config = config
         self.eval_config = self.config.eval
+        self.env = env
         self.newest_model = None
 
     def start(self):
@@ -65,21 +66,21 @@ class EvaluateWorker:
         return winning_rate >= self.eval_config.replace_rate
 
     def play_game(self, newest_model, old_model):
-        env = ChessEnv(self.config).reset()
-        # env = ChessEnv(self.config).randomize(5)
+        self.env.reset()
+        # self.env.randomize(5)
 
         newest_player = ChessPlayer(self.config, newest_model, play_config=self.eval_config.play_config)
         old_player = ChessPlayer(self.config, old_model, play_config=self.eval_config.play_config)
         newest_is_white = random() < 0.5
 
-        while not env.done:
-            ai = newest_player if newest_is_white == (env.board.turn == chess.WHITE) else old_player
-            action = ai.action(env)
-            env.step(action)
+        while not self.env.done:
+            ai = newest_player if newest_is_white == (self.env.board.turn == chess.WHITE) else old_player
+            action = ai.action(self.env)
+            self.env.step(action)
 
         newest_win = None
-        if env.winner != Winner.DRAW:
-            newest_win = newest_is_white == (env.winner == Winner.WHITE)
+        if self.env.winner != Winner.DRAW:
+            newest_win = newest_is_white == (self.env.winner == Winner.WHITE)
         return newest_win, newest_is_white
 
     def load_newest_model(self):

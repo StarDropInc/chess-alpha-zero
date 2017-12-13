@@ -25,7 +25,7 @@ class PlayConfig:
         self.noise_eps = 0.25
         self.dirichlet_alpha = 0.3
         self.change_tau_turn = 20  # 10
-        self.automatic_draw_turn = 50
+        self.automatic_draw_turn = 40
         self.virtual_loss = 3
         self.prediction_queue_size = 16
         self.parallel_search_num = 16

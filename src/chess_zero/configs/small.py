@@ -1,10 +1,10 @@
 class EvaluateConfig:
     def __init__(self):
-        self.game_num = 10  # 10
+        self.game_num = 100  # 10
         self.replace_rate = 0.55
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 100
-        self.play_config.c_puct = 1
+        self.play_config.c_puct = 3  # experimenting with this... was 1
         self.play_config.change_tau_turn = 0
         self.play_config.noise_eps = 0
         self.play_config.syzygy_access = False
@@ -12,7 +12,7 @@ class EvaluateConfig:
 
 class PlayDataConfig:
     def __init__(self):
-        self.nb_game_in_file = 100  # 100
+        self.nb_game_in_file = 20  # 100
         self.max_file_num = 100  # 10
 
 
@@ -21,11 +21,11 @@ class PlayConfig:
         self.simulation_num_per_move = 200  # 10
         self.thinking_loop = 1
         self.logging_thinking = False
-        self.c_puct = 3  # 5
+        self.c_puct = 5
         self.noise_eps = 0.25
         self.dirichlet_alpha = 0.3
         self.change_tau_turn = 20  # 10
-        self.automatic_draw_turn = 50
+        self.automatic_draw_turn = 40
         self.virtual_loss = 3
         self.prediction_queue_size = 16
         self.parallel_search_num = 16
@@ -43,7 +43,7 @@ class TrainerConfig:
         self.start_total_steps = 0
         self.save_model_steps = 2000
         self.load_data_steps = 1000
-        self.min_data_size_to_learn = 10000
+        self.min_data_size_to_learn = 1000
 
 
 class ModelConfig:
@@ -53,5 +53,5 @@ class ModelConfig:
         self.res_layer_num = 19
         self.l2_reg = 1e-4
         self.value_fc_size = 128
-        self.t_history = 1
+        self.t_history = 8  # TEMP for small...
         self.input_stack_height = 7 + self.t_history*14

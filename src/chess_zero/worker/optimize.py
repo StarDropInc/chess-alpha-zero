@@ -13,8 +13,7 @@ from chess_zero.config import Config
 from chess_zero.lib import tf_util
 from chess_zero.lib.data_helper import get_game_data_filenames, read_game_data_from_file
 from chess_zero.lib.model_helper import load_newest_model_weight, save_as_newest_model, clear_old_models
-from chess_zero.env.chess_env import ChessEnv
-import chess
+from chess_zero.env.chess_env import MyBoard
 
 logger = getLogger(__name__)
 
@@ -161,20 +160,13 @@ class OptimizeWorker:
         policy_list = []
         value_list = []
 
-        history = [np.zeros((14, 8, 8)) for _ in range(self.config.model.t_history)]
-        aux_move_number = 1
-        for state, policy, value in data:
-            env = ChessEnv(self.config).update(state)
-            features = env.gather_features(1)
-            move_number = int(state.split(" ")[5])
-            if aux_move_number <= move_number:  # this could break if a "game" is less than or equal to two moves long! (FEN only conveys fullmove.)
-                history.pop(0)
-            else:
-                history = [np.zeros((14, 8, 8)) for _ in range(self.config.model.t_history - 1)]
-            history.append(features[7:])
-            aux_move_number = move_number
+        board = MyBoard(None)
+        board.fullmove_number = 1000  # an arbitrary large value.
 
-            state = np.concatenate((features[:7], np.concatenate(history)))
+        for state, policy, value in data:
+            board.push_fen(state)
+            state = board.gather_features(self.config.model.t_history)
+
             state_list.append(state)
             policy_list.append(policy)
             value_list.append(value)

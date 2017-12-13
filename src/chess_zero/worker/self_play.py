@@ -14,7 +14,7 @@ logger = getLogger(__name__)
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.3)
+    tf_util.set_session_config(per_process_gpu_memory_fraction=0.4)
     return SelfPlayWorker(config, env=ChessEnv(config)).start()
 
 
@@ -64,7 +64,9 @@ class SelfPlayWorker:
         return self.env
 
     def save_play_data(self, write=True):
-        data = self.white.moves + self.black.moves
+        data = [move for pair in zip(self.white.moves, self.black.moves) for move in pair]  # interleave the two lists
+        if len(self.white.moves) > len(self.black.moves):
+            data += [self.white.moves[-1]]  # tack on final move if white moved last
         self.buffer += data
 
         if not write:
