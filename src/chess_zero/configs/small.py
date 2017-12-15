@@ -1,6 +1,6 @@
 class PlayDataConfig:
     def __init__(self):
-        self.nb_game_in_file = 20  # 100
+        self.nb_game_in_file = 100  # 100
         self.max_file_num = 100  # 10
 
 
@@ -19,9 +19,10 @@ class PlayConfig:
         self.parallel_search_num = 16
         self.prediction_worker_sleep_sec = 0.00001
         self.wait_for_expanding_sleep_sec = 0.000001
-        self.resign_threshold = None  #-1.0
+        self.resign_threshold = None
         self.min_resign_turn = 10
-        self.syzygy_access = True
+        self.random_endgame = 5  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
+        self.syzygy_access = False
 
 
 class EvaluateConfig:
@@ -30,8 +31,6 @@ class EvaluateConfig:
         self.replace_rate = 0.55
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 100
-        self.play_config.c_puct = 10
-        self.play_config.tau_decay_rate = 0.99
         self.play_config.noise_eps = 0
         self.play_config.syzygy_access = False
 

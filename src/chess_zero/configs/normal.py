@@ -19,8 +19,9 @@ class PlayConfig:
         self.parallel_search_num = 16
         self.prediction_worker_sleep_sec = 0.0001
         self.wait_for_expanding_sleep_sec = 0.00001
-        self.resign_threshold = None  # -1.0
+        self.resign_threshold = None
         self.min_resign_turn = 10
+        self.random_endgame = -1  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
         self.syzygy_access = True
 
 

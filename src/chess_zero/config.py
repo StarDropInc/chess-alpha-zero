@@ -82,7 +82,7 @@ def _add_move(labels, v, f, r, f_new, r_new, promotion=None):
 
 
 class Config:
-    def __init__(self, config_type="mini"):
+    def __init__(self, config_type="normal"):
         self.opts = Options()
         self.resource = ResourceConfig()
 

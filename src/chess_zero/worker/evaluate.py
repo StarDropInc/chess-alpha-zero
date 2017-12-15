@@ -66,8 +66,11 @@ class EvaluateWorker:
         return winning_rate >= self.eval_config.replace_rate
 
     def play_game(self, newest_model, old_model):
-        self.env.reset()
-        # self.env.randomize(5)
+        random_endgame = self.eval_config.play_config.random_endgame
+        if random_endgame == -1:
+            self.env.reset()
+        else:
+            self.env.randomize(random_endgame)
 
         newest_player = ChessPlayer(self.config, newest_model, play_config=self.eval_config.play_config)
         old_player = ChessPlayer(self.config, old_model, play_config=self.eval_config.play_config)

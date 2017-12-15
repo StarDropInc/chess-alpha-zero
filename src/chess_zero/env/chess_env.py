@@ -49,9 +49,8 @@ class ChessEnv:
         squares = random.sample(range(0, 64), num)
         self.board.set_piece_at(squares[0], chess.Piece(6, chess.WHITE))
         self.board.set_piece_at(squares[1], chess.Piece(6, chess.BLACK))
-        self.board.set_piece_at(squares[2], chess.Piece(random.randrange(1, 6), random.random() < 0.5))
-        self.board.set_piece_at(squares[3], chess.Piece(random.randrange(1, 6), random.random() < 0.5))
-        self.board.set_piece_at(squares[4], chess.Piece(random.randrange(1, 6), random.random() < 0.5))
+        for square in squares[2:]:
+            self.board.set_piece_at(square, chess.Piece(random.randrange(1, 6), random.random() < 0.5))
 
         if not self.board.is_valid() or self.board.is_game_over():  # possible if the randomly generated position is a (stale)mate! note: could replace with setting self.done appropriately.
             return self.randomize(num)

@@ -50,8 +50,11 @@ class SelfPlayWorker:
             idx += 1
 
     def start_game(self, idx):
-        self.env.reset()
-        # self.env.randomize(5)
+        random_endgame = self.config.play.random_endgame
+        if random_endgame == -1:
+            self.env.reset()
+        else:
+            self.env.randomize(random_endgame)
         self.white = ChessPlayer(self.config, self.model)
         self.black = ChessPlayer(self.config, self.model)
         while not self.env.done:

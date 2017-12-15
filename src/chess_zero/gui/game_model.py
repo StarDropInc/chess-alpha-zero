@@ -44,8 +44,11 @@ class PlayWithHuman:
             san = input('\nEnter your move in SAN format ("e4", "Nf3", ... or "quit"): ')
             if san == "quit":
                 raise SystemExit
-            move = env.board.parse_san(san)
-            if move != chess.Move.null():
-                return move
-            else:
+            try:
+                move = env.board.parse_san(san)
+                if move != chess.Move.null():
+                    return move
+                else:
+                    print("That is NOT a valid move :(.")  # how will parse_san ever return a null move...?
+            except:
                 print("That is NOT a valid move :(.")

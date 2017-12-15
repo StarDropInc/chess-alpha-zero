@@ -12,10 +12,15 @@ logger = getLogger(__name__)
 def start(config: Config):
     chess_model = PlayWithHuman(config)
 
-    env = ChessEnv(config).reset()
+    random_endgame = config.play.random_endgame
+    if random_endgame == -1:
+        env = ChessEnv(config).reset()
+    else:
+        env = ChessEnv(config).randomize(random_endgame)
     human_is_white = random() < 0.5
     chess_model.start_game(human_is_white)
 
+    print(env.board)
     while not env.done:
         if (env.board.turn == chess.WHITE) == human_is_white:
             action = chess_model.move_by_human(env)

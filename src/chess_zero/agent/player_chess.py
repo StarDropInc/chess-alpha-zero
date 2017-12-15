@@ -51,14 +51,14 @@ class ChessPlayer:
 
     def action(self, env):
         key = env.transposition_key()
-        legal_moves = env.board.legal_moves  # re-hash moves, for GUI and syzygy... replicating the contents of _hash_moves (there are issues with calling an async from a sync).
+        legal_moves = list(env.board.legal_moves)  # re-hash moves, for GUI and syzygy... replicating the contents of _hash_moves (there are issues with calling an async from a sync).
         # logger.debug(legal_moves)
         legal_labels = np.zeros(self.n_labels)
         legal_labels[[self.labels[move] for move in legal_moves]] = 1
-        self.var_m[key] = legal_moves, legal_labels
 
         for tl in range(self.play_config.thinking_loop):
             if self.play_config.syzygy_access and env.board.num_pieces() <= 5:  # syzygy takes over at this point, to generate training data of optimal quality.
+                self.var_m[key] = legal_moves, legal_labels  # GUI _shouldn't_ bug if this is placed in this conditional...
                 policy = self.syzygy_policy(env)  # note: returns an "all or nothing" policy, regardless of tau, etc.
             else:
                 self.search_moves(env)  # this should leave env invariant!
@@ -137,14 +137,14 @@ class ChessPlayer:
 
         if self.play_config.syzygy_access and env.board.num_pieces() <= 5:  # syzygy bases can guide the internal MCTS search as well, not just the high-level moves.
             while key in self.now_expanding:
-                await asyncio.sleep(self.config.play.wait_for_expanding_sleep_sec)
+                await asyncio.sleep(self.play_config.wait_for_expanding_sleep_sec)
             if key not in self.expanded:
                 leaf_v = await self.syzygy_and_evaluate(env)
                 return leaf_v if env.board.turn == chess.WHITE else -leaf_v
             action_t, move_t = self.select_action_syzygy(env)
         else:
             while key in self.now_expanding:
-                await asyncio.sleep(self.config.play.wait_for_expanding_sleep_sec)
+                await asyncio.sleep(self.play_config.wait_for_expanding_sleep_sec)
             if key not in self.expanded:  # reach leaf node
                 leaf_v = await self.expand_and_evaluate(env)
                 return leaf_v if env.board.turn == chess.WHITE else -leaf_v
@@ -152,7 +152,7 @@ class ChessPlayer:
 
         env.step(move_t)
 
-        virtual_loss = self.config.play.virtual_loss
+        virtual_loss = self.play_config.virtual_loss
         self.var_n[key][action_t] += virtual_loss
         self.var_w[key][action_t] -= virtual_loss
 
@@ -212,7 +212,7 @@ class ChessPlayer:
 
     async def _hash_moves(self, env):
         key = env.transposition_key()
-        legal_moves = env.board.legal_moves
+        legal_moves = list(env.board.legal_moves)
         # logger.debug(legal_moves)
         legal_labels = np.zeros(self.n_labels)
         legal_labels[[self.labels[move] for move in legal_moves]] = 1
@@ -231,7 +231,7 @@ class ChessPlayer:
             if q.empty():
                 if margin > 0:
                     margin -= 1
-                await asyncio.sleep(self.config.play.prediction_worker_sleep_sec)
+                await asyncio.sleep(self.play_config.prediction_worker_sleep_sec)
                 continue
             item_list = [q.get_nowait() for _ in range(q.qsize())]  # type: list[QueueItem]
             # logger.debug(f"predicting {len(item_list)} items")
