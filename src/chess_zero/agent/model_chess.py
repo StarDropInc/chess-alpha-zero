@@ -52,7 +52,7 @@ class ChessModel:
         x = BatchNormalization(axis=1)(x)
         x = Activation("relu")(x)
         x = Flatten()(x)
-        x = Dense(mc.value_fc_size, kernel_regularizer=l2(mc.l2_reg), activation="softmax")(x)  # KEY: changed activation from "relu".
+        x = Dense(mc.value_fc_size, kernel_regularizer=l2(mc.l2_reg), activation="relu")(x)
         value_out = Dense(1, kernel_regularizer=l2(mc.l2_reg), activation="tanh", name="value_out")(x)
 
         self.model = Model(in_x, [policy_out, value_out], name="chess_model")

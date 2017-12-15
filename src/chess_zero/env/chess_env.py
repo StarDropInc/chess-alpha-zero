@@ -153,7 +153,6 @@ class MyBoard(Board):
         else:
             self.set_fen(fen)
 
-
     def repetitions_count(self):  # essentially pilfered from python chess's _can_claim_threefold_repetition_ routine.
         transposition_key = self._transposition_key()
         transpositions = collections.Counter()

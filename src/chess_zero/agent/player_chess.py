@@ -61,13 +61,13 @@ class ChessPlayer:
                 legal_labels = np.zeros(self.n_labels)
                 legal_labels[[self.labels[move] for move in legal_moves]] = 1
                 self.var_moves[key] = legal_moves, legal_labels
-                policy = self.syzygy_policy(env)  # note: in the essentially impossible situation under which num_pieces <= 5 before the change_tau_turn move, this will violate the temperature...
+                policy = self.syzygy_policy(env)  # note: returns an "all or nothing" policy, regardless of tau, etc.
             else:
                 self.search_moves(env)  # this should leave env invariant!
                 policy = self.calc_policy(env)
             action = int(np.random.choice(range(self.n_labels), p=policy))
             action_by_value = int(np.argmax(self.var_q[key] + (self.var_n[key] > 0)*100))  # what is the point of action_by_value?
-            if action == action_by_value or env.fullmove_number < self.play_config.change_tau_turn:
+            if action == action_by_value:  # or env.fullmove_number < self.play_config.change_tau_turn:
                 break
 
         # this is for play_gui, not necessary when training.
@@ -256,19 +256,21 @@ class ChessPlayer:
         for move in self.moves:  # add this game winner result to all past moves.
             move += [z]
 
-    def calc_policy(self, env):  # should (hopefully) be safe to hash the env _after_ reconstituting it from a FEN...
+    def calc_policy(self, env):
         """calc π(a|s0)
         :return:
         """
         pc = self.play_config
         key = env.transposition_key()
-        if env.fullmove_number < pc.change_tau_turn:
-            return self.var_n[key] / (np.sum(self.var_n[key])+1e-8)  # tau = 1
-        else:
+        tau = np.power(pc.tau_decay_rate, env.fullmove_number)
+        if tau <= 0.1:  # avoid numerical errors...?
             action = np.argmax(self.var_n[key])  # tau = 0
             ret = np.zeros(self.n_labels)
             ret[action] = 1
             return ret
+        else:
+            n_exp = np.power(self.var_n[key], 1/tau)
+            return n_exp / np.sum(n_exp)  # should never be dividing by 0
 
     def syzygy_policy(self, env):
         action, _ = self.select_action_syzygy(env)

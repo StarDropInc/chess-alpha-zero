@@ -5,7 +5,7 @@ class EvaluateConfig:
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 10
         self.play_config.c_puct = 1
-        self.play_config.change_tau_turn = 0
+        self.play_config.tau_decay_rate = 0.99
         self.play_config.noise_eps = 0
         self.play_config.syzygy_access = False
 
@@ -24,7 +24,7 @@ class PlayConfig:
         self.c_puct = 5
         self.noise_eps = 0.25
         self.dirichlet_alpha = 0.3
-        self.change_tau_turn = 20  # 10
+        self.tau_decay_rate = 0.99
         self.automatic_draw_turn = 40
         self.virtual_loss = 3
         self.prediction_queue_size = 16
