@@ -36,7 +36,7 @@ class ChessPlayer:
         self.var_w = defaultdict(lambda: np.zeros((self.n_labels,)))
         self.var_q = defaultdict(lambda: np.zeros((self.n_labels,)))
         self.var_p = defaultdict(lambda: np.zeros((self.n_labels,)))
-        self.var_moves = {}  # dict storing the legal moves for each position.
+        self.var_m = {}  # dict storing the legal moves for each position.
         self.expanded = set()
         self.now_expanding = set()
         self.prediction_queue = Queue(self.play_config.prediction_queue_size)
@@ -51,24 +51,24 @@ class ChessPlayer:
 
     def action(self, env):
         key = env.transposition_key()
+        legal_moves = env.board.legal_moves  # re-hash moves, for GUI and syzygy... replicating the contents of _hash_moves (there are issues with calling an async from a sync).
+        # logger.debug(legal_moves)
+        legal_labels = np.zeros(self.n_labels)
+        legal_labels[[self.labels[move] for move in legal_moves]] = 1
+        self.var_m[key] = legal_moves, legal_labels
 
         for tl in range(self.play_config.thinking_loop):
-            if tl > 0 and self.play_config.logging_thinking:
-                logger.debug(f"continue thinking: policy move=({action % 8}, {action // 8}), value move=({action_by_value % 8}, {action_by_value // 8})")
             if self.play_config.syzygy_access and env.board.num_pieces() <= 5:  # syzygy takes over at this point, to generate training data of optimal quality.
-                legal_moves = env.board.legal_moves  # a temporary hack. replicating the contents of _hash_moves (there are issues with calling an async from a sync).
-                # logger.debug(legal_moves)
-                legal_labels = np.zeros(self.n_labels)
-                legal_labels[[self.labels[move] for move in legal_moves]] = 1
-                self.var_moves[key] = legal_moves, legal_labels
                 policy = self.syzygy_policy(env)  # note: returns an "all or nothing" policy, regardless of tau, etc.
             else:
                 self.search_moves(env)  # this should leave env invariant!
                 policy = self.calc_policy(env)
             action = int(np.random.choice(range(self.n_labels), p=policy))
             action_by_value = int(np.argmax(self.var_q[key] + (self.var_n[key] > 0)*100))  # what is the point of action_by_value?
-            if action == action_by_value:  # or env.fullmove_number < self.play_config.change_tau_turn:
-                break
+            if self.play_config.logging_thinking:
+                policy_move = next(move for move in legal_moves if self.labels[move] == action)
+                value_move = next(move for move in legal_moves if self.labels[move] == action_by_value)
+                logger.debug(f"thinking: policy move = {env.board.san(policy_move)}, value move = {env.board.san(value_move)}")
 
         # this is for play_gui, not necessary when training.
         self.thinking_history[env.fen] = HistoryItem(action, policy, list(self.var_q[key]), list(self.var_n[key]))
@@ -79,7 +79,6 @@ class ChessPlayer:
             return chess.Move.null()  # means resign
         else:
             self.moves.append([env.fen, list(policy)])
-            legal_moves, _ = self.var_moves[key]
             move = next(move for move in legal_moves if self.labels[move] == action)
             return move
 
@@ -217,7 +216,7 @@ class ChessPlayer:
         # logger.debug(legal_moves)
         legal_labels = np.zeros(self.n_labels)
         legal_labels[[self.labels[move] for move in legal_moves]] = 1
-        self.var_moves[key] = legal_moves, legal_labels
+        self.var_m[key] = legal_moves, legal_labels
         return legal_moves, legal_labels
 
     async def prediction_worker(self):
@@ -280,7 +279,7 @@ class ChessPlayer:
 
     def select_action_q_and_u(self, env, is_root_node):  # now returns a chess.Move, as opposed to an index
         key = env.transposition_key()
-        legal_moves, legal_labels = self.var_moves[key]  # node has already been expanded and evaluated before this routine is called.
+        legal_moves, legal_labels = self.var_m[key]  # node has already been expanded and evaluated before this routine is called.
 
         # noinspection PyUnresolvedReferences
         xx_ = np.sqrt(np.sum(self.var_n[key]))  # SQRT of sum(N(s, b); for all b)
@@ -302,7 +301,7 @@ class ChessPlayer:
 
     def select_action_syzygy(self, env):
         key = env.transposition_key()
-        legal_moves, _ = self.var_moves[key]  # node has already been (syzygied) and evaluated before this routine is called.
+        legal_moves, _ = self.var_m[key]  # node has already been (syzygied) and evaluated before this routine is called.
 
         violent_wins = {}
         quiets_and_draws = {}

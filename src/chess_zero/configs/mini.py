@@ -1,15 +1,3 @@
-class EvaluateConfig:
-    def __init__(self):
-        self.game_num = 10
-        self.replace_rate = 0.55
-        self.play_config = PlayConfig()
-        self.play_config.simulation_num_per_move = 10
-        self.play_config.c_puct = 1
-        self.play_config.tau_decay_rate = 0.99
-        self.play_config.noise_eps = 0
-        self.play_config.syzygy_access = False
-
-
 class PlayDataConfig:
     def __init__(self):
         self.nb_game_in_file = 10
@@ -34,6 +22,26 @@ class PlayConfig:
         self.resign_threshold = None
         self.min_resign_turn = 5
         self.syzygy_access = True
+
+
+class EvaluateConfig:
+    def __init__(self):
+        self.game_num = 10
+        self.replace_rate = 0.55
+        self.play_config = PlayConfig()
+        self.play_config.simulation_num_per_move = 10
+        self.play_config.c_puct = 1
+        self.play_config.tau_decay_rate = 0.99
+        self.play_config.noise_eps = 0
+        self.play_config.syzygy_access = False
+
+
+class PlayWithHumanConfig:
+    def __init__(self):
+        self.play_config = PlayConfig()
+        self.play_config.thinking_loop = 5
+        self.play_config.logging_thinking = True
+        self.play_config.syzygy_access = False
 
 
 class TrainerConfig:

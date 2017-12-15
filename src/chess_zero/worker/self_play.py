@@ -59,6 +59,9 @@ class SelfPlayWorker:
             action = ai.action(self.env)
             self.env.step(action)
         self.finish_game()
+        game = chess.pgn.Game.from_board(self.env.board)
+        game.headers['Event'] = f"Game {idx}"
+        logger.debug("\n"+str(game))
         self.save_play_data(write=idx % self.config.play_data.nb_game_in_file == 0)
         self.remove_play_data()
         return self.env

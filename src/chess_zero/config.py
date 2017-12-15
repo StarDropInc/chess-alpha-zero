@@ -94,11 +94,13 @@ class Config:
             import chess_zero.configs.normal as c
         else:
             raise RuntimeError(f"unknown config_type: {config_type}")
-        self.model = c.ModelConfig()
-        self.play = c.PlayConfig()
         self.play_data = c.PlayDataConfig()
-        self.trainer = c.TrainerConfig()
+        self.play = c.PlayConfig()
         self.eval = c.EvaluateConfig()
+        self.human = c.PlayWithHumanConfig()
+        self.trainer = c.TrainerConfig()
+        self.model = c.ModelConfig()
+
         self.labels = create_uci_labels()
         self.n_labels = 4672  # 73x8x8. note: this is NOT (i.e. it's more than) the length of self.labels! only actually possible moves are entered as keys in self.labels.
 
@@ -131,30 +133,3 @@ class ResourceConfig:
         for d in dirs:
             if not os.path.exists(d):
                 os.makedirs(d)
-
-
-class PlayWithHumanConfig:
-    def __init__(self):
-        self.simulation_num_per_move = 100
-        self.thinking_loop = 5
-        self.logging_thinking = True
-        self.c_puct = 3
-        self.parallel_search_num = 16
-        self.noise_eps = 0
-        self.tau_decay_rate = 0.99
-        self.resign_threshold = None
-
-    def update_play_config(self, pc):
-        """
-
-        :param PlayConfig pc:
-        :return:
-        """
-        pc.simulation_num_per_move = self.simulation_num_per_move
-        pc.thinking_loop = self.thinking_loop
-        pc.logging_thinking = self.logging_thinking
-        pc.c_puct = self.c_puct
-        pc.noise_eps = self.noise_eps
-        pc.tau_decay_rate = self.tau_decay_rate
-        pc.parallel_search_num = self.parallel_search_num
-        pc.resign_threshold = self.resign_threshold

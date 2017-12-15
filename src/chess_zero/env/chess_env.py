@@ -142,13 +142,15 @@ class MyBoard(Board):
             old_ss = chess.SquareSet(self.occupied_co[self.turn])
             new_ss = chess.SquareSet(new.occupied_co[self.turn])
             diff = list(new_ss.difference(old_ss))
-            if len(diff) == 2:  # castling
-                move = chess.Move(self.king(self.turn), new.king(self.turn))
-            else:
+            if len(diff) == 1:
                 reverse = list(old_ss.difference(new_ss))
                 move = chess.Move(reverse[0], diff[0])
                 if self.piece_at(reverse[0]).piece_type != new.piece_at(diff[0]).piece_type:  # if a promotion occurred...
                     move.promotion = new.piece_at(diff[0]).piece_type
+            elif len(diff) == 2:  # castling
+                move = chess.Move(self.king(self.turn), new.king(self.turn))
+            else:
+                raise RuntimeError("problems with pushed fen.")
             self.push(move)
         else:
             self.set_fen(fen)
