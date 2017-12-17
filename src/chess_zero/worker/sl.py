@@ -2,73 +2,91 @@ import os
 from datetime import datetime
 from logging import getLogger
 from time import time
-import chess
+import chess.pgn
+import re
 from chess_zero.agent.player_chess import ChessPlayer
 from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
 from chess_zero.lib import tf_util
-from chess_zero.lib.data_helper import get_game_data_filenames, write_game_data_to_file
-from chess_zero.lib.model_helper import load_newest_model_weight, save_as_newest_model
+from chess_zero.lib.data_helper import get_game_data_filenames, write_game_data_to_file, find_pgn_files
 from threading import Thread
+
+import random
 
 logger = getLogger(__name__)
 
+TAG_REGEX = re.compile(r"^\[([A-Za-z0-9_]+)\s+\"(.*)\"\]\s*$")
+
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.4)
-    return SelfPlayWorker(config, env=ChessEnv(config)).start()
+    # tf_util.set_session_config(per_process_gpu_memory_fraction=0.01)
+    return SupervisedLearningWorker(config, env=ChessEnv(config)).start()
 
 
-class SelfPlayWorker:
-    def __init__(self, config: Config, env=None, model=None):
+class SupervisedLearningWorker:  # thanks to @Zeta36 and @Akababa for this class.
+    def __init__(self, config: Config, env=None):
         """
-
         :param config:
         :param ChessEnv|None env:
         :param chess_zero.agent.model_chess.ChessModel|None model:
         """
         self.config = config
-        self.model = model
-        self.env = env  # type: ChessEnv
-        self.white = None  # type: ChessPlayer
+        self.env = env     # type: ChessEnv
         self.black = None  # type: ChessPlayer
+        self.white = None  # type: ChessPlayer
         self.buffer = []
         self.idx = 1
 
     def start(self):
-        if self.model is None:
-            self.model = self.load_model()
+        start_time = time()
 
-        while True:
-            start_time = time()
-            env = self.start_game()
+        for env in self.read_all_files():
             end_time = time()
             logger.debug(f"game {self.idx} time={(end_time - start_time):.3f}s "
                          f"turn={int(env.fullmove_number)} {env.winner}"
                          f"{' by resignation ' if env.resigned else ' '}"
                          f"{env.fen.split(' ')[0]:}")
-            if (self.idx % self.config.play_data.nb_game_in_file) == 0:
-                load_newest_model_weight(self.config.resource, self.model)
+            start_time = end_time
             self.idx += 1
 
-    def start_game(self):
-        random_endgame = self.config.play.random_endgame
-        if random_endgame == -1:
-            self.env.reset()
-        else:
-            self.env.randomize(random_endgame)
-        self.white = ChessPlayer(self.config, self.model)
-        self.black = ChessPlayer(self.config, self.model)
-        while not self.env.done:
+        self.buffer = []
+
+    def read_all_files(self):
+        files = find_pgn_files(self.config.resource.play_data_dir)
+        print (files)
+        from itertools import chain
+        return chain.from_iterable(self.read_file(filename) for filename in files)
+
+    def read_file(self,filename):
+        pgn = open(filename, errors='ignore')
+        for offset, header in chess.pgn.scan_headers(pgn):
+            pgn.seek(offset)
+            game = chess.pgn.read_game(pgn)
+            yield self.add_to_buffer(game)
+
+    def add_to_buffer(self,game):
+        self.env.reset()
+        self.white = ChessPlayer(self.config)
+        self.black = ChessPlayer(self.config)
+        result = game.headers["Result"]
+        self.env.board = game.board()
+        for move in game.main_line():
             ai = self.white if self.env.board.turn == chess.WHITE else self.black
-            move = ai.action(self.env)
+            ai.sl_action(self.env, move)
             self.env.step(move)
+
+        self.env.done = True
+        if not self.env.board.is_game_over() and result != '1/2-1/2':
+            self.env.resigned = True
+        if result == '1-0':
+            self.env.winner = Winner.WHITE
+        elif result == '0-1':
+            self.env.winner = Winner.BLACK
+        else:
+            self.env.winner = Winner.DRAW
+
         self.finish_game()
-        game = chess.pgn.Game.from_board(self.env.board)
-        game.headers['Event'] = f"Game {self.idx}"
-        logger.debug("\n"+str(game))
         self.save_play_data()
-        self.remove_play_data()
         return self.env
 
     def save_play_data(self):
@@ -77,7 +95,7 @@ class SelfPlayWorker:
             data += [self.white.moves[-1]]  # tack on final move if white moved last
         self.buffer += data
 
-        if self.idx % self.config.play_data.nb_game_in_file == 0:
+        if self.idx % self.config.play_data.sl_nb_game_in_file == 0:
             self.flush_buffer()
 
     def flush_buffer(self):
@@ -90,11 +108,6 @@ class SelfPlayWorker:
         thread.start()
         self.buffer = []
 
-    def remove_play_data(self):
-        files = get_game_data_filenames(self.config.resource)
-        for i in range(len(files) - self.config.play_data.max_file_num):
-            os.remove(files[i])
-
     def finish_game(self):
         if self.env.winner == Winner.WHITE:
             white_win = 1
@@ -105,11 +118,3 @@ class SelfPlayWorker:
 
         self.white.finish_game(white_win)
         self.black.finish_game(-white_win)
-
-    def load_model(self):
-        from chess_zero.agent.model_chess import ChessModel
-        model = ChessModel(self.config)
-        if self.config.opts.new or not load_newest_model_weight(self.config.resource, model):
-            model.build()
-            save_as_newest_model(self.config.resource, model)
-        return model

@@ -110,22 +110,23 @@ class OptimizeWorker:
     def load_model(self):
         from chess_zero.agent.model_chess import ChessModel
         model = ChessModel(self.config)
-        logger.debug(f"loading newest model")
-        if not load_newest_model_weight(self.config.resource, model):
-            raise RuntimeError(f"newest model cannot be loaded!")
+        if self.config.opts.new or not load_newest_model_weight(self.config.resource, model):
+            model.build()  # optimize will now _also_ build a new model from scratch if none exists.
+            save_as_newest_model(self.config.resource, model)
         return model
 
     def load_play_data(self):
         filenames = get_game_data_filenames(self.config.resource)
+        filenames = filenames[-self.config.trainer.max_num_files_in_memory:]
         updated = False
+        for filename in (self.loaded_filenames - set(filenames)):  # unload first...! memory consumption
+            self.unload_data_of_file(filename)
+            updated = True
+
         for filename in filenames:
             if filename in self.loaded_filenames:
                 continue
             self.load_data_from_file(filename)
-            updated = True
-
-        for filename in (self.loaded_filenames - set(filenames)):
-            self.unload_data_of_file(filename)
             updated = True
 
         if updated:
@@ -145,7 +146,7 @@ class OptimizeWorker:
             logger.warning(str(e))
 
     def unload_data_of_file(self, filename):
-        logger.debug(f"removing data about {filename} from training set")
+        logger.debug(f"removing data {filename} from training set")
         self.loaded_filenames.remove(filename)
         if filename in self.loaded_data:
             del self.loaded_data[filename]

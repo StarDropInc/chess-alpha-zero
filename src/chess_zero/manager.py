@@ -7,7 +7,7 @@ from .config import Config
 
 logger = getLogger(__name__)
 
-CMD_LIST = ['self', 'opt', 'eval', 'gui']
+CMD_LIST = ['self', 'opt', 'eval', 'gui', 'sl']
 
 
 def create_parser():
@@ -49,3 +49,6 @@ def start():
     elif args.cmd == 'gui':
         from .gui import gui
         return gui.start(config)
+    elif args.cmd == 'sl':
+        from .worker import sl
+        return sl.start(config)

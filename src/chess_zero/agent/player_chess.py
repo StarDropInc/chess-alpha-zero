@@ -23,7 +23,7 @@ logger = getLogger(__name__)
 
 
 class ChessPlayer:
-    def __init__(self, config: Config, model, play_config=None):
+    def __init__(self, config: Config, model=None, play_config=None):
 
         self.config = config
         self.model = model
@@ -81,6 +81,14 @@ class ChessPlayer:
             self.moves.append([env.fen, list(policy)])
             move = next(move for move in legal_moves if self.labels[move] == action)
             return move
+
+    def sl_action(self, env, move):
+        ret = np.zeros(self.n_labels)
+        action = self.labels[move]
+        ret[action] = 1
+
+        self.moves.append([env.fen, list(ret)])
+        return move
 
     def ask_thought_about(self, fen) -> HistoryItem:
         return self.thinking_history.get(fen)

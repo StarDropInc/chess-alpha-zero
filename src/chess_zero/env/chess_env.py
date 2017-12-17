@@ -57,16 +57,16 @@ class ChessEnv:
 
         return self
 
-    def step(self, action):
+    def step(self, move):
         """
         :param int|None action, None is resign
         :return:
         """
-        if action == chess.Move.null():
+        if move == chess.Move.null():
             self._resign()
             return
 
-        self.board.push(action)
+        self.board.push(move)
 
         if self._is_game_over():
             self._conclude_game()

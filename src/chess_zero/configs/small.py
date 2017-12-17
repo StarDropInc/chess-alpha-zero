@@ -1,6 +1,7 @@
 class PlayDataConfig:
     def __init__(self):
-        self.nb_game_in_file = 100  # 100
+        self.nb_game_in_file = 20  # 100
+        self.sl_nb_game_in_file = 100
         self.max_file_num = 100  # 10
 
 
@@ -10,7 +11,7 @@ class PlayConfig:
         self.thinking_loop = 1
         self.logging_thinking = False
         self.c_puct = 10  # 3
-        self.noise_eps = .5  # .25
+        self.noise_eps = .25
         self.dirichlet_alpha = 0.3
         self.tau_decay_rate = 0.99
         self.automatic_draw_turn = 100
@@ -21,8 +22,8 @@ class PlayConfig:
         self.wait_for_expanding_sleep_sec = 0.000001
         self.resign_threshold = None
         self.min_resign_turn = 10
-        self.random_endgame = 5  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
-        self.syzygy_access = False
+        self.random_endgame = -1  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
+        self.syzygy_access = True
 
 
 class EvaluateConfig:
@@ -31,7 +32,7 @@ class EvaluateConfig:
         self.replace_rate = 0.55
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 100
-        self.play_config.noise_eps = 0
+        self.play_config.noise_eps = 0.25  # 0.0
         self.play_config.syzygy_access = False
 
 
@@ -51,6 +52,7 @@ class TrainerConfig:
         self.save_model_steps = 2000
         self.load_data_steps = 1000
         self.min_data_size_to_learn = 10000
+        self.max_num_files_in_memory = 20
 
 
 class ModelConfig:

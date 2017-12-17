@@ -1,6 +1,7 @@
 class PlayDataConfig:
     def __init__(self):
         self.nb_game_in_file = 10
+        self.sl_nb_game_in_file = 10
         self.max_file_num = 10
 
 
@@ -51,6 +52,7 @@ class TrainerConfig:
         self.save_model_steps = 1000
         self.load_data_steps = 1000
         self.min_data_size_to_learn = 1000
+        self.max_num_files_in_memory = 10
 
 
 class ModelConfig:
