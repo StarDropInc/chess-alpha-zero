@@ -2,9 +2,9 @@ from chess_zero.config import Config
 
 
 class ChessModelAPI:
-    def __init__(self, config: Config, agent_model):
+    def __init__(self, config: Config, model):
         self.config = config
-        self.agent_model = agent_model
+        self.model = model
 
     def predict(self, x):
         assert x.ndim in (3, 4)
@@ -13,7 +13,9 @@ class ChessModelAPI:
         orig_x = x
         if x.ndim == 3:
             x = x.reshape(1, input_stack_height, 8, 8)
-        policy, value = self.agent_model.model.predict_on_batch(x)
+
+        with self.model.graph.as_default():
+            policy, value = self.model.model.predict_on_batch(x)
 
         if orig_x.ndim == 3:
             return policy[0], value[0]

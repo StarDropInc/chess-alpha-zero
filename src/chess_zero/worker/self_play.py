@@ -3,6 +3,7 @@ from datetime import datetime
 from logging import getLogger
 from time import time
 import chess
+import tensorflow as tf
 from chess_zero.agent.player_chess import ChessPlayer
 from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
@@ -43,10 +44,7 @@ class SelfPlayWorker:
             start_time = time()
             env = self.start_game()
             end_time = time()
-            logger.debug(f"game {self.idx} time={(end_time - start_time):.3f}s "
-                         f"turn={int(env.fullmove_number)} {env.winner}"
-                         f"{' by resignation ' if env.resigned else ' '}"
-                         f"{env.fen.split(' ')[0]:}")
+            logger.debug(f"game {self.idx} time={(end_time - start_time):.3f}s, turn={int(env.fullmove_number)}. {env.winner}, resigned: {env.resigned}, {env.fen}")
             if (self.idx % self.config.play_data.nb_game_in_file) == 0:
                 load_newest_model_weight(self.config.resource, self.model)
             self.idx += 1
@@ -112,4 +110,5 @@ class SelfPlayWorker:
         if self.config.opts.new or not load_newest_model_weight(self.config.resource, model):
             model.build()
             save_as_newest_model(self.config.resource, model)
+        model.graph = tf.get_default_graph()
         return model

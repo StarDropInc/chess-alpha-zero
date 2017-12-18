@@ -2,13 +2,13 @@ from logging import getLogger
 from time import sleep
 from time import time
 
-import keras.backend as k
 import numpy as np
 import os
 from keras.optimizers import SGD
 from keras.callbacks import TensorBoard
+import chess
 
-from chess_zero.agent.model_chess import ChessModel, objective_function_for_policy, objective_function_for_value
+from chess_zero.agent.model_chess import ChessModel, loss_function_for_policy, loss_function_for_value
 from chess_zero.config import Config
 from chess_zero.lib import tf_util
 from chess_zero.lib.data_helper import get_game_data_filenames, read_game_data_from_file
@@ -49,7 +49,7 @@ class OptimizeWorker:
                 sleep(60)
                 self.load_play_data()
                 continue
-            self.update_learning_rate(total_steps)
+            # self.update_learning_rate(total_steps)
             steps = self.train_epoch(tc.epoch_to_checkpoint)
             total_steps += steps
             if last_save_step + tc.save_model_steps < total_steps:
@@ -69,22 +69,9 @@ class OptimizeWorker:
         return steps
 
     def compile_model(self):
-        self.optimizer = SGD(lr=1e-2, momentum=0.9)
-        losses = [objective_function_for_policy, objective_function_for_value]
+        self.optimizer = SGD(lr=2e-1, momentum=0.9)
+        losses = [loss_function_for_policy, loss_function_for_value]
         self.model.model.compile(optimizer=self.optimizer, loss=losses)
-
-    def update_learning_rate(self, total_steps):
-        # see "Mastering Chess and Shogi by Self-Play with a General Reinforcement Learning Algorithm"
-        if total_steps < 100000:
-            lr = 2e-1
-        elif total_steps < 500000:
-            lr = 2e-2
-        elif total_steps < 900000:
-            lr = 2e-3
-        else:
-            lr = 2e-4
-        k.set_value(self.optimizer.lr, lr)
-        logger.debug(f"total step={total_steps}, set learning rate to {lr}")
 
     def replace_current_model(self):
         save_as_newest_model(self.config.resource, self.model)
@@ -136,14 +123,11 @@ class OptimizeWorker:
             except Exception as e:
                 logger.warning(str(e))
 
-    def load_data_from_file(self, filename):
-        try:
-            logger.debug(f"loading data from {filename}")
-            data = read_game_data_from_file(filename)
-            self.loaded_data[filename] = self.convert_to_training_data(data)
-            self.loaded_filenames.add(filename)
-        except Exception as e:
-            logger.warning(str(e))
+    def load_data_from_file(self, filename):  # no longer catching exception.
+        logger.debug(f"loading data from {filename}")
+        data = read_game_data_from_file(filename)
+        self.loaded_data[filename] = self.convert_to_training_data(data)
+        self.loaded_filenames.add(filename)
 
     def unload_data_of_file(self, filename):
         logger.debug(f"removing data {filename} from training set")
@@ -167,6 +151,8 @@ class OptimizeWorker:
         for state, policy, value in data:
             board.push_fen(state)
             state = board.gather_features(self.config.model.t_history)
+            if board.turn == chess.BLACK:
+                policy = Config.flip_policy(policy)
 
             state_list.append(state)
             policy_list.append(policy)

@@ -1,19 +1,17 @@
 import hashlib
 import json
-import urllib.request
-import ftplib
 import os
 from logging import getLogger
 # noinspection PyPep8Naming
-import keras.backend as K
 
+import tensorflow as tf
 from keras.engine.topology import Input
 from keras.engine.training import Model
 from keras.layers.convolutional import Conv2D
 from keras.layers.core import Activation, Dense, Flatten
 from keras.layers.merge import Add
 from keras.layers.normalization import BatchNormalization
-from keras.losses import mean_squared_error
+from keras.losses import categorical_crossentropy, mean_squared_error
 from keras.regularizers import l2
 
 from chess_zero.config import Config
@@ -26,12 +24,13 @@ class ChessModel:
         self.config = config
         self.model = None  # type: Model
         self.digest = None
+        self.graph = None
 
     def build(self):
         mc = self.config.model
         in_x = x = Input((mc.input_stack_height, 8, 8))
         # (batch, channels, height, width)
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_regularizer=l2(mc.l2_reg), input_shape=(mc.input_stack_height, 8, 8))(x)
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_initializer='glorot_normal', bias_initializer='zeros', kernel_regularizer=l2(mc.l2_reg), input_shape=(mc.input_stack_height, 8, 8))(x)
         x = BatchNormalization(axis=1)(x)
         x = Activation("relu")(x)
 
@@ -40,30 +39,30 @@ class ChessModel:
 
         res_out = x
         # for policy output
-        x = Conv2D(filters=2, kernel_size=1, data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(res_out)
+        x = Conv2D(filters=2, kernel_size=1, data_format="channels_first", kernel_initializer='glorot_normal', bias_initializer='zeros', kernel_regularizer=l2(mc.l2_reg))(res_out)
         x = BatchNormalization(axis=1)(x)
         x = Activation("relu")(x)
         x = Flatten()(x)
         # no output for 'pass'
-        policy_out = Dense(self.config.n_labels, kernel_regularizer=l2(mc.l2_reg), activation="softmax", name="policy_out")(x)
+        policy_out = Dense(self.config.n_labels, kernel_initializer='glorot_normal', bias_initializer='zeros', kernel_regularizer=l2(mc.l2_reg), activation="softmax", name="policy_out")(x)
 
         # for value output
-        x = Conv2D(filters=1, kernel_size=1, data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(res_out)
+        x = Conv2D(filters=1, kernel_size=1, data_format="channels_first", kernel_initializer='glorot_normal', bias_initializer='zeros', kernel_regularizer=l2(mc.l2_reg))(res_out)
         x = BatchNormalization(axis=1)(x)
         x = Activation("relu")(x)
         x = Flatten()(x)
-        x = Dense(mc.value_fc_size, kernel_regularizer=l2(mc.l2_reg), activation="relu")(x)
-        value_out = Dense(1, kernel_regularizer=l2(mc.l2_reg), activation="tanh", name="value_out")(x)
+        x = Dense(mc.value_fc_size, kernel_initializer='glorot_normal', bias_initializer='zeros', kernel_regularizer=l2(mc.l2_reg), activation="relu")(x)
+        value_out = Dense(1, kernel_initializer='glorot_normal', bias_initializer='zeros', kernel_regularizer=l2(mc.l2_reg), activation="tanh", name="value_out")(x)
 
         self.model = Model(in_x, [policy_out, value_out], name="chess_model")
 
     def _build_residual_block(self, x):
         mc = self.config.model
         in_x = x
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(x)
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_initializer='glorot_normal', bias_initializer='zeros', kernel_regularizer=l2(mc.l2_reg))(x)
         x = BatchNormalization(axis=1)(x)
         x = Activation("relu")(x)
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_regularizer=l2(mc.l2_reg))(x)
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", data_format="channels_first", kernel_initializer='glorot_normal', bias_initializer='zeros', kernel_regularizer=l2(mc.l2_reg))(x)
         x = BatchNormalization(axis=1)(x)
         x = Add()([in_x, x])
         x = Activation("relu")(x)
@@ -98,10 +97,8 @@ class ChessModel:
         self.digest = self.fetch_digest(weight_path)
         logger.debug(f"saved model digest {self.digest}")
 
-def objective_function_for_policy(y_true, y_pred):
-    # can use categorical_crossentropy??
-    return K.sum(-y_true * K.log(y_pred + K.epsilon()), axis=-1)
+def loss_function_for_policy(y_true, y_pred):
+    return categorical_crossentropy(y_true, y_pred)
 
-
-def objective_function_for_value(y_true, y_pred):
+def loss_function_for_value(y_true, y_pred):
     return mean_squared_error(y_true, y_pred)

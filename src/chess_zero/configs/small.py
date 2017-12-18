@@ -9,21 +9,19 @@ class PlayConfig:
     def __init__(self):
         self.simulation_num_per_move = 200  # 10
         self.thinking_loop = 1
-        self.logging_thinking = False
         self.c_puct = 10  # 3
         self.noise_eps = .25
         self.dirichlet_alpha = 0.3
-        self.tau_decay_rate = 0.99
+        self.change_tau_turn = 40
         self.automatic_draw_turn = 100
         self.virtual_loss = 3
-        self.prediction_queue_size = 16
         self.parallel_search_num = 16
         self.prediction_worker_sleep_sec = 0.00001
         self.wait_for_expanding_sleep_sec = 0.000001
         self.resign_threshold = None
         self.min_resign_turn = 10
         self.random_endgame = -1  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
-        self.syzygy_access = True
+        self.tablebase_access = False
 
 
 class EvaluateConfig:
@@ -33,15 +31,14 @@ class EvaluateConfig:
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 100
         self.play_config.noise_eps = 0.25  # 0.0
-        self.play_config.syzygy_access = False
+        self.play_config.tablebase_access = False
 
 
 class PlayWithHumanConfig:
     def __init__(self):
         self.play_config = PlayConfig()
         self.play_config.thinking_loop = 5
-        self.play_config.logging_thinking = True
-        self.play_config.syzygy_access = False
+        self.play_config.tablebase_access = False
 
 
 class TrainerConfig:

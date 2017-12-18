@@ -2,6 +2,7 @@ import os
 from logging import getLogger
 from random import random
 from time import sleep
+import tensorflow as tf
 import chess
 from chess_zero.agent.model_chess import ChessModel
 from chess_zero.agent.player_chess import ChessPlayer
@@ -53,9 +54,9 @@ class EvaluateWorker:
             if newest_win is not None:
                 results.append(newest_win)
                 winning_rate = sum(results) / len(results)
-            logger.debug(f"game {game_idx}: newest won = {newest_win}, newest played white = {newest_is_white}, winning rate = {winning_rate*100:.1f}%")
+            logger.debug(f"game {game_idx}: newest won = {newest_win}, newest played white = {newest_is_white}, winning rate = {winning_rate*100:.1f}, {self.env.fen}%")
             if results.count(0) >= self.eval_config.game_num * (1-self.eval_config.replace_rate):
-                logger.debug(f"lose count has reached {results.count(0)}, so give up challenge")
+                logger.debug(f"loss count has reached {results.count(0)}, so give up challenge")
                 break
             if results.count(1) >= self.eval_config.game_num * self.eval_config.replace_rate:
                 logger.debug(f"win count has reached {results.count(1)}, current model wins")
@@ -89,6 +90,7 @@ class EvaluateWorker:
     def load_newest_model(self):
         model = ChessModel(self.config)
         load_newest_model_weight(self.config.resource, model)
+        model.graph = tf.get_default_graph()
         return model
 
     def refresh_newest_model(self):
@@ -107,6 +109,7 @@ class EvaluateWorker:
         weight_path = os.path.join(model_dir, rc.model_weight_filename)
         model = ChessModel(self.config)
         model.load(config_path, weight_path)
+        model.graph = tf.get_default_graph()
         return model, model_dir
 
     def remove_model(self, model_dir):

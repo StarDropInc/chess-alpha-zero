@@ -82,9 +82,6 @@ class ChessEnv:
         else:
             self.winner = Winner.WHITE if result == '1-0' else Winner.BLACK
 
-    def absolute_eval(self, relative_eval):
-        return relative_eval if self.board.turn == chess.WHITE else -relative_eval
-
     def _resign(self):
         self.winner = Winner.BLACK if self.board.turn == chess.WHITE else Winner.WHITE
         self.done = True

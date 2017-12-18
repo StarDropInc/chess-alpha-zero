@@ -42,10 +42,7 @@ class SupervisedLearningWorker:  # thanks to @Zeta36 and @Akababa for this class
 
         for env in self.read_all_files():
             end_time = time()
-            logger.debug(f"game {self.idx} time={(end_time - start_time):.3f}s "
-                         f"turn={int(env.fullmove_number)} {env.winner}"
-                         f"{' by resignation ' if env.resigned else ' '}"
-                         f"{env.fen.split(' ')[0]:}")
+            logger.debug(f"game {self.idx} time={(end_time - start_time):.3f}s, turn={int(env.fullmove_number)}. {env.winner}, resigned: {env.resigned}, {env.fen}")
             start_time = end_time
             self.idx += 1
 

@@ -1,10 +1,7 @@
-from _asyncio import Future
-from asyncio.queues import Queue
 from collections import defaultdict, namedtuple
 from logging import getLogger
-import asyncio
-import uvloop
-asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+from concurrent.futures import Future, ThreadPoolExecutor
+from threading import Thread, Lock
 
 from profilehooks import profile
 
@@ -22,6 +19,21 @@ HistoryItem = namedtuple("HistoryItem", "action policy values visit")
 logger = getLogger(__name__)
 
 
+# these are from AGZ nature paper
+class VisitStats:
+    def __init__(self):
+        self.a = defaultdict(ActionStats)  # (key, value) of type (Move, ActionStats)?
+        self.sum_n = 0
+        self.selected_yet = False
+
+
+class ActionStats:
+    def __init__(self):
+        self.n = 0
+        self.w = 0
+        self.q = 0
+
+
 class ChessPlayer:
     def __init__(self, config: Config, model=None, play_config=None):
 
@@ -32,54 +44,47 @@ class ChessPlayer:
 
         self.labels = self.config.labels
         self.n_labels = config.n_labels
-        self.var_n = defaultdict(lambda: np.zeros((self.n_labels,)))
-        self.var_w = defaultdict(lambda: np.zeros((self.n_labels,)))
-        self.var_q = defaultdict(lambda: np.zeros((self.n_labels,)))
-        self.var_p = defaultdict(lambda: np.zeros((self.n_labels,)))
-        self.var_m = {}  # dict storing the legal moves for each position.
-        self.expanded = set()
-        self.now_expanding = set()
-        self.prediction_queue = Queue(self.play_config.prediction_queue_size)
-        self.sem = asyncio.Semaphore(self.play_config.parallel_search_num)
-        self.tablebases = chess.syzygy.open_tablebases(self.config.resource.syzygy_dir)
+        self.tablebases = chess.syzygy.open_tablebases(self.config.resource.tablebase_dir)
+        self.prediction_queue_lock = Lock()
+        self.is_thinking = False
 
         self.moves = []
-        self.loop = asyncio.get_event_loop()
-        self.running_simulation_num = 0
 
-        self.thinking_history = {}  # for fun
+        self.reset()
+
+    def reset(self):
+        self.tree = defaultdict(VisitStats)
+        self.node_lock = defaultdict(Lock)
+        self.prediction_queue = []
 
     def action(self, env):
+        self.reset()
+
         key = env.transposition_key()
-        legal_moves = list(env.board.legal_moves)  # re-hash moves, for GUI and syzygy... replicating the contents of _hash_moves (there are issues with calling an async from a sync).
-        # logger.debug(legal_moves)
-        legal_labels = np.zeros(self.n_labels)
-        legal_labels[[self.labels[move] for move in legal_moves]] = 1
 
-        for tl in range(self.play_config.thinking_loop):
-            if self.play_config.syzygy_access and env.board.num_pieces() <= 5:  # syzygy takes over at this point, to generate training data of optimal quality.
-                self.var_m[key] = legal_moves, legal_labels  # GUI _shouldn't_ bug if this is placed in this conditional...
-                policy = self.syzygy_policy(env)  # note: returns an "all or nothing" policy, regardless of tau, etc.
-            else:
-                self.search_moves(env)  # this should leave env invariant!
-                policy = self.calc_policy(env)
-            action = int(np.random.choice(range(self.n_labels), p=policy))
-            action_by_value = int(np.argmax(self.var_q[key] + (self.var_n[key] > 0)*100))  # what is the point of action_by_value?
-            if self.play_config.logging_thinking:
-                policy_move = next(move for move in legal_moves if self.labels[move] == action)
-                value_move = next(move for move in legal_moves if self.labels[move] == action_by_value)
-                logger.debug(f"thinking: policy move = {env.board.san(policy_move)}, value move = {env.board.san(value_move)}")
+        self.is_thinking = True
+        prediction_worker = Thread(target=self.predict_batch_worker, name="prediction_worker")
+        prediction_worker.daemon = True
+        prediction_worker.start()
 
-        # this is for play_gui, not necessary when training.
-        self.thinking_history[env.fen] = HistoryItem(action, policy, list(self.var_q[key]), list(self.var_n[key]))
+        try:  # what exceptions do you think will be thrown here?
+            for tl in range(self.play_config.thinking_loop):
+                if self.play_config.tablebase_access and env.board.num_pieces() <= 5:  # tablebase takes over
+                    policy = self.tablebase_policy(env)  # note: returns an "all or nothing" policy, regardless of tau, etc.
+                else:
+                    self.search_moves(env)  # this should leave env invariant!
+                    policy = self.calc_policy(env)
+                action = int(np.random.choice(range(self.n_labels), p=policy))
+        finally:
+            self.is_thinking = False
 
         if self.play_config.resign_threshold is not None and \
            self.play_config.min_resign_turn < env.fullmove_number and \
-           env.absolute_eval(self.retrieve_eval(env.fen)) <= self.play_config.resign_threshold:
+           np.max([a_s.q for a_s in self.tree[key].a.values()]) <= self.play_config.resign_threshold:  # technically, resigning should be determined by leaf_v.
             return chess.Move.null()  # means resign
         else:
             self.moves.append([env.fen, list(policy)])
-            move = next(move for move in legal_moves if self.labels[move] == action)
+            move = next(move for move in self.tree[key].a.keys() if self.labels[move] == action)
             return move
 
     def sl_action(self, env, move):
@@ -90,121 +95,84 @@ class ChessPlayer:
         self.moves.append([env.fen, list(ret)])
         return move
 
-    def ask_thought_about(self, fen) -> HistoryItem:
-        return self.thinking_history.get(fen)
-
-    def retrieve_eval(self, fen):
-        last_history = self.ask_thought_about(fen)
-        last_evaluation = last_history.values[last_history.action]
-        return last_evaluation
-
-    @profile
     def search_moves(self, env):
-        start = time.time()
-        loop = self.loop
-        self.running_simulation_num = 0
+        futures = []
+        with ThreadPoolExecutor(max_workers=self.play_config.parallel_search_num) as executor:
+            for _ in range(self.play_config.simulation_num_per_move):
+                futures.append(executor.submit(self.search_my_move, env=env.copy(), is_root_node=True))
+        [f.result() for f in futures]
 
-        coroutine_list = []
-        for it in range(self.play_config.simulation_num_per_move):
-            cor = self.start_search_my_move(env)
-            coroutine_list.append(cor)
-
-        coroutine_list.append(self.prediction_worker())
-        loop.run_until_complete(asyncio.gather(*coroutine_list))
-        # logger.debug(f"Search time per move: {time.time()-start}")
-        # uncomment to see profile result per move
-        # raise
-
-    async def start_search_my_move(self, env):
-        self.running_simulation_num += 1
-        with await self.sem:  # reduce parallel search number
-            my_env = env.copy()  # use this option to preserve history... but it's slow...!
-            # my_env = ChessEnv(self.config).update(env.fen)
-            leaf_v = await self.search_my_move(my_env, is_root_node=True)
-            self.running_simulation_num -= 1
-            return leaf_v  # it would appear that this return has no purpose.
-
-    async def search_my_move(self, env: ChessEnv, is_root_node=False):
+    def search_my_move(self, env: ChessEnv, is_root_node=False):
         """
 
         Q, V is value for this Player (always white).
         P is value for the player of next_player (white or black)
         :param env:
         :param is_root_node:
-        :return:
+        :return: leaf value
         """
         if env.done:  # should an MCTS worker even have access to mate info...?
-            if env.winner == Winner.WHITE:
-                return 1
-            elif env.winner == Winner.BLACK:
-                return -1
-            else:
+            if env.winner == Winner.DRAW:
                 return 0
+            else:
+                return -1  # a tricky optimization: this conditional will _only_ execute if the side to move has just lost.
 
         key = env.transposition_key()
 
-        if self.play_config.syzygy_access and env.board.num_pieces() <= 5:  # syzygy bases can guide the internal MCTS search as well, not just the high-level moves.
-            while key in self.now_expanding:
-                await asyncio.sleep(self.play_config.wait_for_expanding_sleep_sec)
-            if key not in self.expanded:
-                leaf_v = await self.syzygy_and_evaluate(env)
-                return leaf_v if env.board.turn == chess.WHITE else -leaf_v
-            action_t, move_t = self.select_action_syzygy(env)
-        else:
-            while key in self.now_expanding:
-                await asyncio.sleep(self.play_config.wait_for_expanding_sleep_sec)
-            if key not in self.expanded:  # reach leaf node
-                leaf_v = await self.expand_and_evaluate(env)
-                return leaf_v if env.board.turn == chess.WHITE else -leaf_v
-            action_t, move_t = self.select_action_q_and_u(env, is_root_node)
+        my_lock = self.node_lock[key]
+
+        with my_lock:
+            if key not in self.tree:
+                leaf_v = self.expand_and_evaluate(env)
+                return leaf_v  # I'm returning everything from the POV of side to move
+            # keep the same lock open?
+            move_t, action_t = self.select_action_q_and_u(env, is_root_node)
 
         env.step(move_t)
 
         virtual_loss = self.play_config.virtual_loss
-        self.var_n[key][action_t] += virtual_loss
-        self.var_w[key][action_t] -= virtual_loss
+        with my_lock:
+            my_visitstats = self.tree[key]
+            my_actionstats = my_visitstats.a[move_t]
 
-        leaf_v = await self.search_my_move(env)  # next move
+            my_visitstats.sum_n += virtual_loss
+            my_actionstats.n += virtual_loss
+            my_actionstats.w += -virtual_loss
 
-        # on returning search path
-        # update: N, W, Q
-        n = self.var_n[key][action_t] = self.var_n[key][action_t] - virtual_loss + 1
-        w = self.var_w[key][action_t] = self.var_w[key][action_t] + virtual_loss + leaf_v
-        self.var_q[key][action_t] = w / n
+        leaf_v = -self.search_my_move(env)  # next move
+
+        # on returning search path, update: N, W, Q
+        with my_lock:
+            my_visitstats.sum_n += -virtual_loss + 1
+            my_actionstats.n += -virtual_loss + 1
+            my_actionstats.w += virtual_loss + leaf_v
+            my_actionstats.q = my_actionstats.w / my_actionstats.n
 
         return leaf_v
 
-    @profile
-    async def expand_and_evaluate(self, env):
+    def expand_and_evaluate(self, env) -> float:
         """expand new leaf
 
-        update var_p, return leaf_v
+        this is called with state locked
+        insert P(a|s), return leaf_v
 
         :param ChessEnv env:
         :return: leaf_v
         """
-        key = env.transposition_key()
-        self.now_expanding.add(key)
+        if self.play_config.tablebase_access and env.board.num_pieces() <= 5:
+            return self.tablebase_and_evaluate(env)
 
         state = env.board.gather_features(self.config.model.t_history)
-        future = await self.predict(state)  # type: Future
+        leaf_p, leaf_v = self.predict(state)
 
-        await future
-        leaf_p, leaf_v = future.result()
+        if env.board.turn == chess.BLACK:
+            leaf_p = Config.flip_policy(leaf_p)
 
-        legal_moves, legal_labels = await self._hash_moves(env)
-        leaf_p = leaf_p * legal_labels  # mask policy vector and renormalize.
-        leaf_p = leaf_p / sum(leaf_p) if sum(leaf_p) > 0 else leaf_p
-        self.var_p[key] = leaf_p
+        self.tree[env.transposition_key()].temp_p = leaf_p
 
-        self.expanded.add(key)
-        self.now_expanding.remove(key)
         return float(leaf_v)
 
-    async def syzygy_and_evaluate(self, env):
-        key = env.transposition_key()
-        self.now_expanding.add(key)
-
+    def tablebase_and_evaluate(self, env):
         wdl = self.tablebases.probe_wdl(env.board)
         if wdl == 2:
             leaf_v = 1
@@ -213,46 +181,29 @@ class ChessPlayer:
         else:
             leaf_v = 0
 
-        await self._hash_moves(env)  # is this a good place for this to happen...?
-        self.expanded.add(key)
-        self.now_expanding.remove(key)
         return float(leaf_v)
 
-    async def _hash_moves(self, env):
-        key = env.transposition_key()
-        legal_moves = list(env.board.legal_moves)
-        # logger.debug(legal_moves)
-        legal_labels = np.zeros(self.n_labels)
-        legal_labels[[self.labels[move] for move in legal_moves]] = 1
-        self.var_m[key] = legal_moves, legal_labels
-        return legal_moves, legal_labels
+    def predict_batch_worker(self):
+        while self.is_thinking:
+            if self.prediction_queue:
+                with self.prediction_queue_lock:
+                    item_list = self.prediction_queue  # doesn't this just copy the reference?
+                    self.prediction_queue = []
 
-    async def prediction_worker(self):
-        """For better performance, queueing prediction requests and predict together in this worker.
+                # logger.debug(f"predicting {len(item_list)} items")
+                data = np.array([x.state for x in item_list])
+                policy_ary, value_ary = self.api.predict(data)
+                for item, p, v in zip(item_list, policy_ary, value_ary):
+                    item.future.set_result((p, v))
+            else:
+                time.sleep(self.play_config.prediction_worker_sleep_sec)
 
-        speed up about 45sec -> 15sec for example.
-        :return:
-        """
-        q = self.prediction_queue
-        margin = 10  # avoid finishing before other searches starting.
-        while self.running_simulation_num > 0 or margin > 0:
-            if q.empty():
-                if margin > 0:
-                    margin -= 1
-                await asyncio.sleep(self.play_config.prediction_worker_sleep_sec)
-                continue
-            item_list = [q.get_nowait() for _ in range(q.qsize())]  # type: list[QueueItem]
-            # logger.debug(f"predicting {len(item_list)} items")
-            data = np.array([x.state for x in item_list])
-            policy_ary, value_ary = self.api.predict(data)
-            for p, v, item in zip(policy_ary, value_ary, item_list):
-                item.future.set_result((p, v))
-
-    async def predict(self, x):
-        future = self.loop.create_future()
-        item = QueueItem(x, future)
-        await self.prediction_queue.put(item)
-        return future
+    def predict(self, state):
+        future = Future()
+        item = QueueItem(state, future)
+        with self.prediction_queue_lock:  # lists are atomic anyway though
+            self.prediction_queue.append(item)
+        return future.result()
 
     def finish_game(self, z):
         """
@@ -268,55 +219,63 @@ class ChessPlayer:
         :return:
         """
         pc = self.play_config
-        key = env.transposition_key()
-        tau = np.power(pc.tau_decay_rate, env.fullmove_number)
-        if tau <= 0.1:  # avoid numerical errors...?
-            action = np.argmax(self.var_n[key])  # tau = 0
+
+        my_visitstats = self.tree[env.transposition_key()]
+        var_n = np.zeros(self.n_labels)
+        var_n[[self.labels[move] for move in my_visitstats.a.keys()]] = [a_s.n for a_s in my_visitstats.a.values()]  # too 'pythonic'? a.keys() and a.values() are guaranteed to be in the same order.
+
+        if env.fullmove_number < pc.change_tau_turn:
+            return var_n / my_visitstats.sum_n  # should never be dividing by 0
+        else:
+            action = np.argmax(var_n)  # tau = 0
             ret = np.zeros(self.n_labels)
             ret[action] = 1
             return ret
-        else:
-            n_exp = np.power(self.var_n[key], 1/tau)
-            return n_exp / np.sum(n_exp)  # should never be dividing by 0
 
-    def syzygy_policy(self, env):
-        action, _ = self.select_action_syzygy(env)
+    def tablebase_policy(self, env):
+        _, action = self.select_action_tablebase(env)
         ret = np.zeros(self.n_labels)
         ret[action] = 1
         return ret
 
-    def select_action_q_and_u(self, env, is_root_node):  # now returns a chess.Move, as opposed to an index
-        key = env.transposition_key()
-        legal_moves, legal_labels = self.var_m[key]  # node has already been expanded and evaluated before this routine is called.
+    def select_action_q_and_u(self, env, is_root_node):
+        # this method is called with state locked
+        if self.play_config.tablebase_access and env.board.num_pieces() <= 5:
+            return self.select_action_tablebase(env)
+
+        my_visitstats = self.tree[env.transposition_key()]
+        if not my_visitstats.selected_yet:
+            my_visitstats.selected_yet = True
+            tot_p = 0
+            for move in env.board.legal_moves:
+                move_p = my_visitstats.temp_p[self.labels[move]]
+                my_visitstats.a[move].p = move_p  # defaultdict is key here.
+                tot_p += move_p
+            for a_s in my_visitstats.a.values():
+                a_s.p /= tot_p
 
         # noinspection PyUnresolvedReferences
-        xx_ = np.sqrt(np.sum(self.var_n[key]))  # SQRT of sum(N(s, b); for all b)
-        xx_ += 1  # avoid u_=0 if N is all 0  # WAS max(xx_, 1)... avoid a discontinuity...!
-        p_ = self.var_p[key]
+        xx_ = np.sqrt(my_visitstats.sum_n + 1)  # SQRT of sum(N(s, b); for all b)
 
-        if is_root_node:  # Is it correct? -> (1-e)p + e*Dir(0.03)
-            p_ = (1 - self.play_config.noise_eps) * p_ + self.play_config.noise_eps * np.random.dirichlet([self.play_config.dirichlet_alpha] * self.n_labels)
+        e = self.play_config.noise_eps
+        c_puct = self.play_config.c_puct
+        dirichlet_alpha = self.play_config.dirichlet_alpha
 
-        u_ = self.play_config.c_puct * p_ * xx_ / (1 + self.var_n[key])
+        v_ = {move:(a_s.q + c_puct * (a_s.p if not is_root_node else (1 - e) * a_s.p + e * np.random.dirichlet([dirichlet_alpha])) * xx_ / (1 + a_s.n)) for move, a_s in my_visitstats.a.items()}  # too much on one line...?
+        move_t = max(v_, key=v_.get)
+        action_t = self.labels[move_t]
 
-        v_ = ((1 if env.board.turn == chess.WHITE else -1) * self.var_q[key] + u_ + 1000) * legal_labels
-        # under extreme bad luck, the vector p_, and thus u_, could become entirely negative after dirichlet noise. need the argmaxing _legal_ index, even if negative...
+        return move_t, action_t
 
-        # noinspection PyTypeChecker
-        action_t = int(np.argmax(v_))
-        move_t = next(move for move in legal_moves if self.labels[move] == action_t) # this iterator must yield exactly one item! the restriction of _labels_ to _legal_moves_ is injective.
-        return action_t, move_t
-
-    def select_action_syzygy(self, env):
+    def select_action_tablebase(self, env):
         key = env.transposition_key()
-        legal_moves, _ = self.var_m[key]  # node has already been (syzygied) and evaluated before this routine is called.
 
         violent_wins = {}
         quiets_and_draws = {}
         violent_losses = {}
-        for move in legal_moves:  # note: node probably _hasn't_ been expanded. this move generation could probably be stored, but...
+        for move in env.board.legal_moves:  # note: not worrying about hashing this.
             is_zeroing = env.board.is_zeroing(move)
-            env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the syzygy bases. but gaviota are much larger...
+            env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the tablebase bases. but gaviota are much larger...
             dtz = self.tablebases.probe_dtz(env.board)  # casting to float isn't necessary; is coerced below upon comparison to 0.0
             value = 1/dtz if dtz != 0.0 else 0.0  # a trick: fast mated < slow mated < draw < slow mate < fast mate
             if is_zeroing and value < 0:
@@ -333,4 +292,5 @@ class ChessPlayer:
         elif violent_losses:
             move_t = min(violent_losses, key=violent_losses.get)
         action_t = self.labels[move_t]
-        return action_t, move_t
+        return move_t, action_t
+
