@@ -9,7 +9,7 @@ from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
 from chess_zero.lib import tf_util
 from chess_zero.lib.data_helper import get_game_data_filenames, write_game_data_to_file, find_pgn_files
-from threading import Thread
+# from threading import Thread
 
 import random
 
@@ -45,7 +45,6 @@ class SupervisedLearningWorker:  # thanks to @Zeta36 and @Akababa for this class
             logger.debug(f"game {self.idx} time={(end_time - start_time):.3f}s, turn={int(env.fullmove_number)}. {env.winner}, resigned: {env.resigned}, {env.fen}")
             start_time = end_time
             self.idx += 1
-
         self.buffer = []
 
     def read_all_files(self):
@@ -101,8 +100,9 @@ class SupervisedLearningWorker:  # thanks to @Zeta36 and @Akababa for this class
         path = os.path.join(rc.play_data_dir, rc.play_data_filename_tmpl % game_id)
         logger.info(f"save play data to {path}")
         #print(self.buffer)
-        thread = Thread(target = write_game_data_to_file, args=(path, (self.buffer)))
-        thread.start()
+        write_game_data_to_file(path, self.buffer)  # was having problems with multi-threading: file-write not failing to complete quickly and failing to be loaded by the trainer.
+        # thread = Thread(target = write_game_data_to_file, args=(path, (self.buffer)))
+        # thread.start()
         self.buffer = []
 
     def finish_game(self):

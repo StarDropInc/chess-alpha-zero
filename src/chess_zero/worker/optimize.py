@@ -4,7 +4,7 @@ from time import time
 
 import numpy as np
 import os
-from keras.optimizers import SGD
+from keras.optimizers import Adam
 from keras.callbacks import TensorBoard
 import chess
 
@@ -49,7 +49,6 @@ class OptimizeWorker:
                 sleep(60)
                 self.load_play_data()
                 continue
-            # self.update_learning_rate(total_steps)
             steps = self.train_epoch(tc.epoch_to_checkpoint)
             total_steps += steps
             if last_save_step + tc.save_model_steps < total_steps:
@@ -69,7 +68,7 @@ class OptimizeWorker:
         return steps
 
     def compile_model(self):
-        self.optimizer = SGD(lr=2e-1, momentum=0.9)
+        self.optimizer = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         losses = [loss_function_for_policy, loss_function_for_value]
         self.model.model.compile(optimizer=self.optimizer, loss=losses)
 
@@ -123,11 +122,14 @@ class OptimizeWorker:
             except Exception as e:
                 logger.warning(str(e))
 
-    def load_data_from_file(self, filename):  # no longer catching exception.
-        logger.debug(f"loading data from {filename}")
-        data = read_game_data_from_file(filename)
-        self.loaded_data[filename] = self.convert_to_training_data(data)
-        self.loaded_filenames.add(filename)
+    def load_data_from_file(self, filename):
+        try:  # necessary to catch an exception here: if the play data file isn't completely written yet, then some error will be thrown about a "missing delimiter", etc.
+            logger.debug(f"loading data from {filename}")
+            data = read_game_data_from_file(filename)
+            self.loaded_data[filename] = self.convert_to_training_data(data)
+            self.loaded_filenames.add(filename)
+        except Exception as e:
+            logger.warning(str(e))
 
     def unload_data_of_file(self, filename):
         logger.debug(f"removing data {filename} from training set")

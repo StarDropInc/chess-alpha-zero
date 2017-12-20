@@ -9,7 +9,7 @@ class PlayConfig:
     def __init__(self):
         self.simulation_num_per_move = 800
         self.thinking_loop = 1
-        self.c_puct = 10
+        self.c_puct = 3
         self.noise_eps = 0.25
         self.dirichlet_alpha = 0.3
         self.change_tau_turn = 40
@@ -30,8 +30,6 @@ class EvaluateConfig:
         self.replace_rate = 0.55
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 800
-        self.play_config.c_puct = 10
-        self.play_config.tau_decay_rate = 0.99
         self.play_config.noise_eps = 0
         self.play_config.tablebase_access = False
 

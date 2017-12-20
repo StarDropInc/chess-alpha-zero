@@ -173,6 +173,7 @@ class MyBoard(Board):
 
     def gather_features(self, t_history):  # t_history = T denotes the number of half-moves back into the game's history to go. In AlphaZero: T = 8
         stack = []
+
         stack.append(np.full((1, 8, 8), self.halfmove_clock))  # np.int64's will later be coerced into np.float64's.
         stack.append(np.full((1, 8, 8), self.has_queenside_castling_rights(False), dtype=np.float64))
         stack.append(np.full((1, 8, 8), self.has_kingside_castling_rights(False), dtype=np.float64))
@@ -182,6 +183,14 @@ class MyBoard(Board):
         stack.append(np.full((1, 8, 8), self.turn, dtype=np.float64))
         self._recursive_append(stack, t_history - 1, self.turn)
         return np.concatenate(stack)
+
+        # board_enemy = [ord(self.piece_at(square).symbol()) if self.piece_at(square) is not None and self.piece_at(square).color != self.turn else 0 for square in chess.SquareSet(chess.BB_ALL)]
+        # board_enemy = np.reshape(board_enemy, ((8, 8)))
+        # stack.append(np.flip(board_enemy, 0))
+        # board_own = [ord(self.piece_at(square).symbol()) if self.piece_at(square) is not None and self.piece_at(square).color == self.turn else 0 for square in chess.SquareSet(chess.BB_ALL)]
+        # board_own = np.reshape(board_own, ((8, 8)))
+        # stack.append(np.flip(board_own, 0))
+        # return np.stack(stack, axis=0)
 
     def _recursive_append(self, stack, depth, side):
         if depth > 0:
@@ -201,9 +210,9 @@ class MyBoard(Board):
         stack.append(np.ones((1, 8, 8)) if repetitions >= 2 else np.zeros((1, 8, 8)))
         stack.append(np.ones((1, 8, 8)) if repetitions >= 3 else np.zeros((1, 8, 8)))
 
-        board_enemy = [self._one_hot(self.piece_at(idx), not side) for idx in range(64)]
+        board_enemy = [self._one_hot(self.piece_at(square), not side) for square in chess.SquareSet(chess.BB_ALL)]
         board_enemy = np.transpose(np.reshape(board_enemy, (8, 8, 6)), (2, 0, 1))
-        stack.append(np.flip(board_enemy, 1) if side else np.flip(board_enemy, 2))
-        board_own = [self._one_hot(self.piece_at(idx), side) for idx in range(64)]
+        stack.append(np.flip(board_enemy, 1) if side == chess.WHITE else np.flip(board_enemy, 2))
+        board_own = [self._one_hot(self.piece_at(square), side) for square in chess.SquareSet(chess.BB_ALL)]
         board_own = np.transpose(np.reshape(board_own, (8, 8, 6)), (2, 0, 1))
-        stack.append(np.flip(board_own, 1) if side else np.flip(board_own, 2))
+        stack.append(np.flip(board_own, 1) if side == chess.WHITE else np.flip(board_own, 2))

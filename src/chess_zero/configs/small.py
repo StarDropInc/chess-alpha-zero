@@ -1,6 +1,6 @@
 class PlayDataConfig:
     def __init__(self):
-        self.nb_game_in_file = 20  # 100
+        self.nb_game_in_file = 100  # 100
         self.sl_nb_game_in_file = 100
         self.max_file_num = 100  # 10
 
@@ -9,7 +9,7 @@ class PlayConfig:
     def __init__(self):
         self.simulation_num_per_move = 200  # 10
         self.thinking_loop = 1
-        self.c_puct = 10  # 3
+        self.c_puct = 3
         self.noise_eps = .25
         self.dirichlet_alpha = 0.3
         self.change_tau_turn = 40
@@ -46,9 +46,9 @@ class TrainerConfig:
         self.batch_size = 32  # 2048
         self.epoch_to_checkpoint = 1
         self.start_total_steps = 0
-        self.save_model_steps = 2000
+        self.save_model_steps = 10000  # 2000
         self.load_data_steps = 1000
-        self.min_data_size_to_learn = 10000
+        self.min_data_size_to_learn = 1000
         self.max_num_files_in_memory = 20
 
 
@@ -56,8 +56,8 @@ class ModelConfig:
     def __init__(self):
         self.cnn_filter_num = 256
         self.cnn_filter_size = 3
-        self.res_layer_num = 19
+        self.res_layer_num = 7
         self.l2_reg = 1e-4
         self.value_fc_size = 265
-        self.t_history = 8  # TEMP for small...
+        self.t_history = 1
         self.input_stack_height = 7 + self.t_history*14

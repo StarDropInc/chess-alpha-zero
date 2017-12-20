@@ -1,5 +1,6 @@
 from logging import getLogger
 
+import tensorflow as tf
 from chess_zero.agent.player_chess import HistoryItem
 from chess_zero.agent.player_chess import ChessPlayer
 from chess_zero.config import Config
@@ -28,14 +29,11 @@ class PlayWithHuman:
         model = ChessModel(self.config)
         if not load_newest_model_weight(self.config.resource, model):
             raise RuntimeError("newest model not found!")
+        model.graph = tf.get_default_graph()
         return model
 
     def move_by_ai(self, env):
         action = self.ai.action(env)
-
-        self.last_history = self.ai.ask_thought_about(env.fen)
-        self.last_evaluation = self.last_history.values[self.last_history.action]
-        logger.debug(f"Evaluation by AI = {self.last_evaluation}")
 
         return action
 

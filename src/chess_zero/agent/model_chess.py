@@ -97,8 +97,10 @@ class ChessModel:
         self.digest = self.fetch_digest(weight_path)
         logger.debug(f"saved model digest {self.digest}")
 
+
 def loss_function_for_policy(y_true, y_pred):
     return categorical_crossentropy(y_true, y_pred)
+
 
 def loss_function_for_value(y_true, y_pred):
     return mean_squared_error(y_true, y_pred)

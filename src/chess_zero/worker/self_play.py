@@ -64,6 +64,7 @@ class SelfPlayWorker:
         self.finish_game()
         game = chess.pgn.Game.from_board(self.env.board)
         game.headers['Event'] = f"Game {self.idx}"
+        game.headers['White'] = game.headers['Black'] = f"AI {self.model.digest[:10]}..."
         logger.debug("\n"+str(game))
         self.save_play_data()
         self.remove_play_data()
