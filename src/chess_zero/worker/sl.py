@@ -8,10 +8,8 @@ from chess_zero.agent.player_chess import ChessPlayer
 from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
 from chess_zero.lib import tf_util
-from chess_zero.lib.data_helper import get_game_data_filenames, write_game_data_to_file, find_pgn_files
-# from threading import Thread
-
-import random
+from chess_zero.lib.data_helper import write_game_data_to_file, find_pgn_files
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 logger = getLogger(__name__)
 
@@ -19,7 +17,6 @@ TAG_REGEX = re.compile(r"^\[([A-Za-z0-9_]+)\s+\"(.*)\"\]\s*$")
 
 
 def start(config: Config):
-    # tf_util.set_session_config(per_process_gpu_memory_fraction=0.01)
     return SupervisedLearningWorker(config, env=ChessEnv(config)).start()
 
 
@@ -31,87 +28,83 @@ class SupervisedLearningWorker:  # thanks to @Zeta36 and @Akababa for this class
         :param chess_zero.agent.model_chess.ChessModel|None model:
         """
         self.config = config
-        self.env = env     # type: ChessEnv
-        self.black = None  # type: ChessPlayer
-        self.white = None  # type: ChessPlayer
-        self.buffer = []
-        self.idx = 1
 
     def start(self):
+        self.buffer = []
         start_time = time()
 
-        for env in self.read_all_files():
-            end_time = time()
-            logger.debug(f"game {self.idx} time={(end_time - start_time):.3f}s, turn={int(env.fullmove_number)}. {env.winner}, resigned: {env.resigned}, {env.fen}")
-            start_time = end_time
-            self.idx += 1
-        self.buffer = []
+        with ProcessPoolExecutor(max_workers=7) as executor:
+            games = self.get_games_from_all_files()
+            game_idx = 0
+            for future in as_completed([executor.submit(supervised_buffer, self.config, game) for game in games]):
+                game_idx += 1
+                env, data = future.result()
+                self.buffer += data
+                if game_idx % self.config.play_data.sl_nb_game_in_file == 0:
+                    self.flush_buffer()
+                end_time = time()
+                logger.debug(f"game {game_idx} time={(end_time - start_time):.3f}s, turn={int(env.fullmove_number)}. {env.winner}, resigned: {env.resigned}, {env.fen}")
+                start_time = end_time
 
-    def read_all_files(self):
+        # self.flush_buffer()  # uneven number of games in file.
+
+    def get_games_from_all_files(self):
         files = find_pgn_files(self.config.resource.play_data_dir)
-        print (files)
-        from itertools import chain
-        return chain.from_iterable(self.read_file(filename) for filename in files)
+        games = []
+        for filename in files:
+            games.extend(self.get_games_from_file(filename))
+        return games
 
-    def read_file(self,filename):
+    def get_games_from_file(self,filename):
         pgn = open(filename, errors='ignore')
-        for offset, header in chess.pgn.scan_headers(pgn):
+        games = []
+        for offset in chess.pgn.scan_offsets(pgn):
             pgn.seek(offset)
-            game = chess.pgn.read_game(pgn)
-            yield self.add_to_buffer(game)
-
-    def add_to_buffer(self,game):
-        self.env.reset()
-        self.white = ChessPlayer(self.config)
-        self.black = ChessPlayer(self.config)
-        result = game.headers["Result"]
-        self.env.board = game.board()
-        for move in game.main_line():
-            ai = self.white if self.env.board.turn == chess.WHITE else self.black
-            ai.sl_action(self.env, move)
-            self.env.step(move)
-
-        self.env.done = True
-        if not self.env.board.is_game_over() and result != '1/2-1/2':
-            self.env.resigned = True
-        if result == '1-0':
-            self.env.winner = Winner.WHITE
-        elif result == '0-1':
-            self.env.winner = Winner.BLACK
-        else:
-            self.env.winner = Winner.DRAW
-
-        self.finish_game()
-        self.save_play_data()
-        return self.env
-
-    def save_play_data(self):
-        data = [move for pair in zip(self.white.moves, self.black.moves) for move in pair]  # interleave the two lists
-        if len(self.white.moves) > len(self.black.moves):
-            data += [self.white.moves[-1]]  # tack on final move if white moved last
-        self.buffer += data
-
-        if self.idx % self.config.play_data.sl_nb_game_in_file == 0:
-            self.flush_buffer()
+            games.append(chess.pgn.read_game(pgn))
+        return games
 
     def flush_buffer(self):
         rc = self.config.resource
         game_id = datetime.now().strftime("%Y%m%d-%H%M%S.%f")
         path = os.path.join(rc.play_data_dir, rc.play_data_filename_tmpl % game_id)
-        logger.info(f"save play data to {path}")
-        #print(self.buffer)
-        write_game_data_to_file(path, self.buffer)  # was having problems with multi-threading: file-write not failing to complete quickly and failing to be loaded by the trainer.
-        # thread = Thread(target = write_game_data_to_file, args=(path, (self.buffer)))
+        logger.info(f"saving play data to {path}")
+        # thread = Thread(target = write_game_data_to_file, args=(path, self.buffer))
         # thread.start()
+        write_game_data_to_file(path, self.buffer)  # was having problems with multi-threading: file-write not failing to complete quickly and failing to be loaded by the trainer.
         self.buffer = []
 
-    def finish_game(self):
-        if self.env.winner == Winner.WHITE:
-            white_win = 1
-        elif self.env.winner == Winner.BLACK:
-            white_win = -1
-        else:
-            white_win = 0
 
-        self.white.finish_game(white_win)
-        self.black.finish_game(-white_win)
+def supervised_buffer(config, game) -> (ChessEnv, list):
+    env = ChessEnv(config).reset()
+    white = ChessPlayer(config, dummy=True)
+    black = ChessPlayer(config, dummy=True)
+    result = game.headers["Result"]
+    env.board = game.board()
+    for move in game.main_line():
+        ai = white if env.board.turn == chess.WHITE else black
+        ai.sl_action(env, move)
+        env.step(move)
+
+    if not env.board.is_game_over() and result != '1/2-1/2':
+        env.resigned = True
+    if result == '1-0':
+        env.winner = Winner.WHITE
+        white_win = 1
+    elif result == '0-1':
+        env.winner = Winner.BLACK
+        white_win = -1
+    else:
+        env.winner = Winner.DRAW
+        white_win = 0
+
+    white.finish_game(white_win)
+    black.finish_game(-white_win)
+    return env, merge_data(white, black)
+
+
+def merge_data(white, black):
+    data = [move for pair in zip(white.moves, black.moves) for move in pair]  # interleave the two lists
+    if len(white.moves) > len(black.moves):
+        data += [white.moves[-1]]  # tack on final move if white moved last
+
+    return data

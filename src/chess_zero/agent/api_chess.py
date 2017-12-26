@@ -1,23 +1,39 @@
 from chess_zero.config import Config
-
+from threading import Thread
+import numpy as np
+import multiprocessing as mp
+from multiprocessing import connection
+import time
 
 class ChessModelAPI:
-    def __init__(self, config: Config, model):
-        self.config = config
+    def __init__(self, model):
         self.model = model
+        self.pipes = []
 
-    def predict(self, x):
-        assert x.ndim in (3, 4)
-        input_stack_height = self.config.model.input_stack_height
-        assert x.shape == (input_stack_height, 8, 8) or x.shape[1:] == (input_stack_height, 8, 8)  # should I get rid of these assertions...? they will change.
-        orig_x = x
-        if x.ndim == 3:
-            x = x.reshape(1, input_stack_height, 8, 8)
+    def start(self):
+        prediction_worker = Thread(target=self.predict_batch_worker, name="prediction_worker")
+        prediction_worker.daemon = True
+        prediction_worker.start()
 
-        with self.model.graph.as_default():
-            policy, value = self.model.model.predict_on_batch(x)
+    def get_pipe(self):
+        me, you = mp.Pipe()
+        self.pipes.append(me)
+        return you
 
-        if orig_x.ndim == 3:
-            return policy[0], value[0]
-        else:
-            return policy, value
+    def predict_batch_worker(self):
+        while True:
+            ready = mp.connection.wait(self.pipes, timeout=0.001)
+            if not ready:
+                continue
+            data, result_pipes = [], []
+            for pipe in ready:
+                while pipe.poll():
+                    data.append(pipe.recv())
+                    result_pipes.append(pipe)
+            if not data:
+                continue
+            data = np.asarray(data, dtype=np.float32)
+            with self.model.graph.as_default():
+                policy_ary, value_ary = self.model.model.predict_on_batch(data)
+            for pipe, p, v in zip(result_pipes, policy_ary, value_ary):
+                pipe.send((p, float(v)))

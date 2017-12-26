@@ -29,7 +29,6 @@ class PlayWithHuman:
         model = ChessModel(self.config)
         if not load_newest_model_weight(self.config.resource, model):
             raise RuntimeError("newest model not found!")
-        model.graph = tf.get_default_graph()
         return model
 
     def move_by_ai(self, env):

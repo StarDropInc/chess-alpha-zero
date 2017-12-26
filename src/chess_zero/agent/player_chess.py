@@ -1,18 +1,15 @@
 from collections import defaultdict, namedtuple
 from logging import getLogger
-from concurrent.futures import Future, ThreadPoolExecutor
-from threading import Thread, Lock
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
-from profilehooks import profile
-
-import time
 import numpy as np
 import chess
 
-from chess_zero.agent.api_chess import ChessModelAPI
 from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
 # import chess.gaviota
+# import chess.syzygy
 
 QueueItem = namedtuple("QueueItem", "state future")
 HistoryItem = namedtuple("HistoryItem", "action policy values visit")
@@ -25,7 +22,6 @@ class VisitStats:
     def __init__(self):
         self.a = defaultdict(ActionStats)  # (key, value) of type (Move, ActionStats)?
         self.sum_n = 0
-        self.selected_yet = False
 
 
 class ActionStats:
@@ -36,57 +32,44 @@ class ActionStats:
 
 
 class ChessPlayer:
-    def __init__(self, config: Config, model=None, play_config=None):
+    def __init__(self, config: Config, pipes=None, dummy=False, play_config=None):
 
         self.config = config
-        self.model = model
         self.play_config = play_config or self.config.play
-        self.api = ChessModelAPI(self.config, self.model)
 
         self.labels = self.config.labels
         self.n_labels = config.n_labels
         # self.tablebases = chess.gaviota.open_tablebases(self.config.resource.tablebase_dir)
         # self.tablebases = chess.syzygy.open_tablebases(self.config.resource.tablebase_dir)
-        self.prediction_queue_lock = Lock()
-        self.is_thinking = False
-
         self.moves = []
+        if dummy:
+            return
 
+        self.pipe_pool = pipes
+        self.node_lock = defaultdict(Lock)
         self.reset()
 
     def reset(self):
         self.tree = defaultdict(VisitStats)
-        self.node_lock = defaultdict(Lock)
-        self.prediction_queue = []
 
     def action(self, env):
         self.reset()
 
-        key = env.transposition_key()
-
-        self.is_thinking = True
-        prediction_worker = Thread(target=self.predict_batch_worker, name="prediction_worker")
-        prediction_worker.daemon = True
-        prediction_worker.start()
-
-        try:  # what exceptions do you think will be thrown here?
-            for tl in range(self.play_config.thinking_loop):
-                if self.play_config.tablebase_access and env.board.num_pieces() <= 5:  # tablebase takes over
-                    policy = self.tablebase_policy(env)  # note: returns an "all or nothing" policy, regardless of tau, etc.
-                else:
-                    self.search_moves(env)  # this should leave env invariant!
-                    policy = self.calc_policy(env)
-                action = int(np.random.choice(range(self.n_labels), p=policy))
-        finally:
-            self.is_thinking = False
+        if self.play_config.tablebase_access and env.board.num_pieces() <= 5:  # tablebase takes over
+            root_value = self.tablebase_and_evaluate(env)
+            policy = self.tablebase_policy(env)  # note: returns an "all or nothing" policy, regardless of tau, etc.
+        else:
+            root_value = self.search_moves(env)  # this should leave env invariant!
+            policy = self.calc_policy(env)
+        action = int(np.random.choice(range(self.n_labels), p=policy))
 
         if self.play_config.resign_threshold is not None and \
            self.play_config.min_resign_turn < env.fullmove_number and \
-           np.max([a_s.q for a_s in self.tree[key].a.values()]) <= self.play_config.resign_threshold:  # technically, resigning should be determined by leaf_v.
+           root_value <= self.play_config.resign_threshold:  # technically, resigning should be determined by leaf_v?
             return chess.Move.null()  # means resign
         else:
             self.moves.append([env.fen, list(policy)])
-            move = next(move for move in self.tree[key].a.keys() if self.labels[move] == action)
+            move = next(move for move in self.tree[env.transposition_key()].a.keys() if self.labels[move] == action)
             return move
 
     def sl_action(self, env, move):
@@ -97,14 +80,14 @@ class ChessPlayer:
         self.moves.append([env.fen, list(ret)])
         return move
 
-    def search_moves(self, env):
-        futures = []
-        with ThreadPoolExecutor(max_workers=self.play_config.parallel_search_num) as executor:
-            for _ in range(self.play_config.simulation_num_per_move):
-                futures.append(executor.submit(self.search_my_move, env=env.copy(), is_root_node=True))
-        [f.result() for f in futures]
+    def search_moves(self, env) -> (float, float):
+        num_sims = self.play_config.simulation_num_per_move
+        with ThreadPoolExecutor(max_workers=self.play_config.search_threads) as executor:
+            vals = executor.map(self.search_my_move, [env.copy() for _ in range(num_sims)], [True for _ in range(num_sims)])
 
-    def search_my_move(self, env: ChessEnv, is_root_node=False):
+        return np.max(vals)
+
+    def search_my_move(self, env: ChessEnv, is_root_node):
         """
 
         Q, V is value for this Player (always white).
@@ -113,7 +96,7 @@ class ChessPlayer:
         :param is_root_node:
         :return: leaf value
         """
-        if env.done:  # should an MCTS worker even have access to mate info...?
+        if env.done:
             if env.winner == Winner.DRAW:
                 return 0
             else:
@@ -121,39 +104,36 @@ class ChessPlayer:
 
         key = env.transposition_key()
 
-        my_lock = self.node_lock[key]
-
-        with my_lock:
+        with self.node_lock[key]:
             if key not in self.tree:
-                leaf_v = self.expand_and_evaluate(env)
-                return leaf_v  # I'm returning everything from the POV of side to move
+                leaf_p, leaf_v = self.expand_and_evaluate(env)
+                self.tree[key].p = leaf_p
+                return leaf_v  # returning everything from the POV of side to move
             # keep the same lock open?
             move_t, action_t = self.select_action_q_and_u(env, is_root_node)
 
+            virtual_loss = self.play_config.virtual_loss
+            my_visit_stats = self.tree[key]
+            my_action_stats = my_visit_stats.a[move_t]
+            my_visit_stats.sum_n += virtual_loss
+            my_action_stats.n += virtual_loss
+            my_action_stats.w += -virtual_loss
+            my_action_stats.q = my_action_stats.w / my_action_stats.n  # fixed a bug: must update q here...
+
+
         env.step(move_t)
-
-        virtual_loss = self.play_config.virtual_loss
-        with my_lock:
-            my_visitstats = self.tree[key]
-            my_actionstats = my_visitstats.a[move_t]
-
-            my_visitstats.sum_n += virtual_loss
-            my_actionstats.n += virtual_loss
-            my_actionstats.w += -virtual_loss
-            my_actionstats.q = my_actionstats.w / my_actionstats.n  # fixed a bug: must update q here...
-
-        leaf_v = -self.search_my_move(env)  # next move
+        leaf_v = -self.search_my_move(env, False)  # next move
 
         # on returning search path, update: N, W, Q
-        with my_lock:
-            my_visitstats.sum_n += -virtual_loss + 1
-            my_actionstats.n += -virtual_loss + 1
-            my_actionstats.w += virtual_loss + leaf_v
-            my_actionstats.q = my_actionstats.w / my_actionstats.n
+        with self.node_lock[key]:
+            my_visit_stats.sum_n += -virtual_loss + 1
+            my_action_stats.n += -virtual_loss + 1
+            my_action_stats.w += virtual_loss + leaf_v
+            my_action_stats.q = my_action_stats.w / my_action_stats.n
 
         return leaf_v
 
-    def expand_and_evaluate(self, env) -> float:
+    def expand_and_evaluate(self, env) -> (np.ndarray, float):
         """expand new leaf
 
         this is called with state locked
@@ -171,9 +151,7 @@ class ChessPlayer:
         if env.board.turn == chess.BLACK:
             leaf_p = Config.flip_policy(leaf_p)
 
-        self.tree[env.transposition_key()].temp_p = leaf_p
-
-        return float(leaf_v)
+        return leaf_p, leaf_v
 
     def tablebase_and_evaluate(self, env):
         wdl = self.tablebases.probe_wdl(env.board)
@@ -187,27 +165,12 @@ class ChessPlayer:
 
         return float(leaf_v)
 
-    def predict_batch_worker(self):
-        while self.is_thinking:
-            if self.prediction_queue:
-                with self.prediction_queue_lock:
-                    item_list = self.prediction_queue  # doesn't this just copy the reference?
-                    self.prediction_queue = []
-
-                # logger.debug(f"predicting {len(item_list)} items")
-                data = np.array([x.state for x in item_list])
-                policy_ary, value_ary = self.api.predict(data)
-                for item, p, v in zip(item_list, policy_ary, value_ary):
-                    item.future.set_result((p, v))
-            else:
-                time.sleep(self.play_config.prediction_worker_sleep_sec)
-
     def predict(self, state):
-        future = Future()
-        item = QueueItem(state, future)
-        with self.prediction_queue_lock:  # lists are atomic anyway though
-            self.prediction_queue.append(item)
-        return future.result()
+        pipe = self.pipe_pool.pop()
+        pipe.send(state)
+        ret = pipe.recv()
+        self.pipe_pool.append(pipe)
+        return ret
 
     def finish_game(self, z):
         """
@@ -224,14 +187,14 @@ class ChessPlayer:
         """
         pc = self.play_config
 
-        my_visitstats = self.tree[env.transposition_key()]
-        var_n = np.zeros(self.n_labels)
-        var_n[[self.labels[move] for move in my_visitstats.a.keys()]] = [a_s.n for a_s in my_visitstats.a.values()]  # too 'pythonic'? a.keys() and a.values() are guaranteed to be in the same order.
+        my_visit_stats = self.tree[env.transposition_key()]
+        policy = np.zeros(self.n_labels)
+        policy[[self.labels[move] for move in my_visit_stats.a.keys()]] = [a_s.n for a_s in my_visit_stats.a.values()]  # too 'pythonic'? a.keys() and a.values() are guaranteed to be in the same order.
 
         if env.fullmove_number < pc.change_tau_turn:
-            return var_n / my_visitstats.sum_n  # should never be dividing by 0
+            return policy / my_visit_stats.sum_n  # should never be dividing by 0
         else:
-            action = np.argmax(var_n)  # tau = 0
+            action = np.argmax(policy)  # tau = 0
             ret = np.zeros(self.n_labels)
             ret[action] = 1
             return ret
@@ -247,25 +210,24 @@ class ChessPlayer:
         if self.play_config.tablebase_access and env.board.num_pieces() <= 5:
             return self.select_action_tablebase(env)
 
-        my_visitstats = self.tree[env.transposition_key()]
-        if not my_visitstats.selected_yet:
-            my_visitstats.selected_yet = True
+        my_visit_stats = self.tree[env.transposition_key()]
+        if my_visit_stats.p is not None:
             tot_p = 0
             for move in env.board.legal_moves:
-                move_p = my_visitstats.temp_p[self.labels[move]]
-                my_visitstats.a[move].p = move_p  # defaultdict is key here.
+                move_p = my_visit_stats.p[self.labels[move]]
+                my_visit_stats.a[move].p = move_p  # defaultdict is key here.
                 tot_p += move_p
-            for a_s in my_visitstats.a.values():
+            for a_s in my_visit_stats.a.values():
                 a_s.p /= tot_p
+            my_visit_stats.p = None
 
-        # noinspection PyUnresolvedReferences
-        xx_ = np.sqrt(my_visitstats.sum_n + 1)  # SQRT of sum(N(s, b); for all b)
+        xx_ = np.sqrt(my_visit_stats.sum_n + 1)  # SQRT of sum(N(s, b); for all b)
 
         e = self.play_config.noise_eps
         c_puct = self.play_config.c_puct
         dirichlet_alpha = self.play_config.dirichlet_alpha
 
-        v_ = {move:(a_s.q + c_puct * (a_s.p if not is_root_node else (1 - e) * a_s.p + e * np.random.dirichlet([dirichlet_alpha])) * xx_ / (1 + a_s.n)) for move, a_s in my_visitstats.a.items()}  # too much on one line...?
+        v_ = {move:(a_s.q + c_puct * (a_s.p if not is_root_node else (1 - e) * a_s.p + e * np.random.dirichlet([dirichlet_alpha])) * xx_ / (1 + a_s.n)) for move, a_s in my_visit_stats.a.items()}  # too much on one line...?
         move_t = max(v_, key=v_.get)
         action_t = self.labels[move_t]
 
@@ -283,28 +245,28 @@ class ChessPlayer:
         action_t = self.labels[move_t]
         return move_t, action_t
 
-        # Uncomment the below code if using the SYZYGY TABLEBASES. NOTE: syzygy only provides _distance to zero_, which in general does not coincide with optimal _distance to mate_.
-        # violent_wins = {}
-        # quiets_and_draws = {}
-        # violent_losses = {}
-        # for move in env.board.legal_moves:  # note: not worrying about hashing this.
-        #     is_zeroing = env.board.is_zeroing(move)
-        #     env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the tablebase bases. but gaviota are much larger...
-        #     dtz = self.tablebases.probe_dtz(env.board)  # casting to float isn't necessary; is coerced below upon comparison to 0.0
-        #     value = 1/dtz if dtz != 0.0 else 0.0  # a trick: fast mated < slow mated < draw < slow mate < fast mate
-        #     if is_zeroing and value < 0:
-        #         violent_wins[move] = value
-        #     elif not is_zeroing or value == 0:
-        #         quiets_and_draws[move] = value
-        #     elif is_zeroing and value > 0:
-        #         violent_losses[move] = value
-        #     env.board.pop()
-        # if violent_wins:
-        #     move_t = min(violent_wins, key=violent_wins.get)
-        # elif quiets_and_draws:
-        #     move_t = min(quiets_and_draws, key=quiets_and_draws.get)
-        # elif violent_losses:
-        #     move_t = min(violent_losses, key=violent_losses.get)
-        action_t = self.labels[move_t]
-        return move_t, action_t
-
+    # Uncomment the below code if using the SYZYGY TABLEBASES. NOTE: syzygy only provides _distance to zero_, which in general does not coincide with optimal _distance to mate_.
+    # def select_action_tablebase(self, env):
+    #     violent_wins = {}
+    #     quiets_and_draws = {}
+    #     violent_losses = {}
+    #     for move in env.board.legal_moves:  # note: not worrying about hashing this.
+    #         is_zeroing = env.board.is_zeroing(move)
+    #         env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the tablebase bases. but gaviota are much larger...
+    #         dtz = self.tablebases.probe_dtz(env.board)  # casting to float isn't necessary; is coerced below upon comparison to 0.0
+    #         value = 1/dtz if dtz != 0.0 else 0.0  # a trick: fast mated < slow mated < draw < slow mate < fast mate
+    #         if is_zeroing and value < 0:
+    #             violent_wins[move] = value
+    #         elif not is_zeroing or value == 0:
+    #             quiets_and_draws[move] = value
+    #         elif is_zeroing and value > 0:
+    #             violent_losses[move] = value
+    #         env.board.pop()
+    #     if violent_wins:
+    #         move_t = min(violent_wins, key=violent_wins.get)
+    #     elif quiets_and_draws:
+    #         move_t = min(quiets_and_draws, key=quiets_and_draws.get)
+    #     elif violent_losses:
+    #         move_t = min(violent_losses, key=violent_losses.get)
+    #     action_t = self.labels[move_t]
+    #     return move_t, action_t

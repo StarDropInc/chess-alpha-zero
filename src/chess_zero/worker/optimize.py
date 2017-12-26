@@ -4,22 +4,23 @@ from time import time
 
 import numpy as np
 import os
-from keras.optimizers import Adam
 from keras.callbacks import TensorBoard
+from keras.optimizers import Adam
 import chess
 
-from chess_zero.agent.model_chess import ChessModel, loss_function_for_policy, loss_function_for_value
 from chess_zero.config import Config
 from chess_zero.lib import tf_util
 from chess_zero.lib.data_helper import get_game_data_filenames, read_game_data_from_file
 from chess_zero.lib.model_helper import load_newest_model_weight, save_as_newest_model, clear_old_models
 from chess_zero.env.chess_env import MyBoard
+from chess_zero.agent.model_chess import ChessModel
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 logger = getLogger(__name__)
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.5)
+    tf_util.set_session_config(config.trainer.vram_frac)
     return OptimizeWorker(config).start()
 
 
@@ -39,13 +40,12 @@ class OptimizeWorker:
     def training(self):
         self.compile_model()
         tc = self.config.trainer
-        last_load_data_step = last_save_step = total_steps = tc.start_total_steps
-        min_data_size_to_learn = tc.min_data_size_to_learn
+        last_load_data_step = last_save_step = total_steps = 0
         self.load_play_data()
 
         while True:
-            if self.dataset_size < min_data_size_to_learn:
-                logger.info(f"dataset_size={self.dataset_size} is less than {min_data_size_to_learn}")
+            if self.dataset_size < tc.min_data_size_to_learn:
+                logger.info(f"dataset_size={self.dataset_size} is less than {tc.min_data_size_to_learn}")
                 sleep(60)
                 self.load_play_data()
                 continue
@@ -61,31 +61,28 @@ class OptimizeWorker:
 
     def train_epoch(self, epochs):
         tc = self.config.trainer
-        state_ary, policy_ary, value_ary = self.dataset
-        # tensorboard = TensorBoard(log_dir=os.path.join(self.config.resource.log_dir, str(time())), histogram_freq=0, batch_size=32, write_graph=True, write_grads=True, write_images=True, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None)
-        self.model.model.fit(state_ary, [policy_ary, value_ary], batch_size=tc.batch_size, epochs=epochs)  # ..., callbacks=[tensorboard])
+        state_deque, policy_deque, value_deque = self.dataset
+        state_ary, policy_ary, value_ary = np.asarray(state_deque), np.asarray(policy_deque), np.asarray(value_deque)
+        tensorboard_cb = TensorBoard(log_dir=self.config.resource.log_dir, batch_size=tc.batch_size, histogram_freq=1)
+        self.model.model.fit(state_ary, [policy_ary, value_ary], batch_size=tc.batch_size, epochs=epochs, shuffle=True, validation_split=0.05, callbacks=[tensorboard_cb])
         steps = (state_ary.shape[0] // tc.batch_size) * epochs
         return steps
 
     def compile_model(self):
         self.optimizer = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
-        losses = [loss_function_for_policy, loss_function_for_value]
+        losses = ['categorical_crossentropy', 'mean_squared_error']
         self.model.model.compile(optimizer=self.optimizer, loss=losses)
 
     def replace_current_model(self):
         save_as_newest_model(self.config.resource, self.model)
         clear_old_models(self.config.resource)
 
-    def collect_all_loaded_data(self):
-        state_ary_list, policy_ary_list, value_ary_list = [], [], []
-        for s_ary, p_ary, v_ary in self.loaded_data.values():
-            state_ary_list.append(s_ary)
-            policy_ary_list.append(p_ary)
-            value_ary_list.append(v_ary)
-        state_ary = np.concatenate(state_ary_list)
-        policy_ary = np.concatenate(policy_ary_list)
-        value_ary = np.concatenate(value_ary_list)
-        return state_ary, policy_ary, value_ary
+    def load_model(self):
+        model = ChessModel(self.config)
+        if self.config.opts.new or not load_newest_model_weight(self.config.resource, model):
+            model.build()  # optimize will now _also_ build a new model from scratch if none exists.
+            save_as_newest_model(self.config.resource, model)
+        return model
 
     @property
     def dataset_size(self):
@@ -93,71 +90,57 @@ class OptimizeWorker:
             return 0
         return len(self.dataset[0])
 
-    def load_model(self):
-        from chess_zero.agent.model_chess import ChessModel
-        model = ChessModel(self.config)
-        if self.config.opts.new or not load_newest_model_weight(self.config.resource, model):
-            model.build()  # optimize will now _also_ build a new model from scratch if none exists.
-            save_as_newest_model(self.config.resource, model)
-        return model
-
     def load_play_data(self):
-        filenames = get_game_data_filenames(self.config.resource)
-        filenames = filenames[-self.config.trainer.max_num_files_in_memory:]
-        updated = False
-        for filename in (self.loaded_filenames - set(filenames)):  # unload first...! memory consumption
-            self.unload_data_of_file(filename)
-            updated = True
+        new_filenames = set(get_game_data_filenames(self.config.resource)[-self.config.trainer.max_num_files_in_memory:])
 
-        for filename in filenames:
-            if filename in self.loaded_filenames:
-                continue
-            self.load_data_from_file(filename)
-            updated = True
-
-        if updated:
-            logger.debug("updating training dataset")
-            try:
-                self.dataset = self.collect_all_loaded_data()
-            except Exception as e:
-                logger.warning(str(e))
-
-    def load_data_from_file(self, filename):
-        try:  # necessary to catch an exception here: if the play data file isn't completely written yet, then some error will be thrown about a "missing delimiter", etc.
-            logger.debug(f"loading data from {filename}")
-            data = read_game_data_from_file(filename)
-            self.loaded_data[filename] = self.convert_to_training_data(data)
-            self.loaded_filenames.add(filename)
-        except Exception as e:
-            logger.warning(str(e))
-
-    def unload_data_of_file(self, filename):
-        logger.debug(f"removing data {filename} from training set")
-        self.loaded_filenames.remove(filename)
-        if filename in self.loaded_data:
+        for filename in self.loaded_filenames - new_filenames:
+            logger.debug(f"removing data {filename} from training set")
+            self.loaded_filenames.remove(filename)
             del self.loaded_data[filename]
 
-    def convert_to_training_data(self, data):
-        """
+        with ProcessPoolExecutor(max_workers=self.config.trainer.cleaning_processes) as executor:
+            futures = {executor.submit(load_data_from_file, filename, self.config.model.t_history):filename for filename in new_filenames - self.loaded_filenames}
+            for future in as_completed(futures):
+                filename = futures[future]
+                logger.debug(f"loading data from {filename}")
+                self.loaded_filenames.add(filename)
+                self.loaded_data[filename] = future.result()
 
-        :param data: format is SelfPlayWorker.buffer
-        :return:
-        """
-        state_list = []
-        policy_list = []
-        value_list = []
+        self.dataset = self.collect_all_loaded_data()
 
-        board = MyBoard(None)
-        board.fullmove_number = 1000  # an arbitrary large value.
+    def collect_all_loaded_data(self):
+        if not self.loaded_data:
+            return
+        state_ary_list, policy_ary_list, value_ary_list = [], [], []
+        for s_ary, p_ary, v_ary in self.loaded_data.values():
+            state_ary_list.extend(s_ary)
+            policy_ary_list.extend(p_ary)
+            value_ary_list.extend(v_ary)
+        state_ary = np.stack(state_ary_list)
+        policy_ary = np.stack(policy_ary_list)
+        value_ary = np.expand_dims(np.stack(value_ary_list), axis=1)
+        return state_ary, policy_ary, value_ary
 
-        for state, policy, value in data:
-            board.push_fen(state)
-            state = board.gather_features(self.config.model.t_history)
-            if board.turn == chess.BLACK:
-                policy = Config.flip_policy(policy)
 
-            state_list.append(state)
-            policy_list.append(policy)
-            value_list.append(value)
+def load_data_from_file(filename, t_history):
+    # necessary to catch an exception here...? if the play data file isn't completely written yet, then some error will be thrown about a "missing delimiter", etc.
+    data = read_game_data_from_file(filename)
 
-        return np.array(state_list), np.array(policy_list), np.array(value_list)
+    state_list = []
+    policy_list = []
+    value_list = []
+
+    board = MyBoard(None)
+    board.fullmove_number = 1000  # an arbitrary large value.
+
+    for state, policy, value in data:
+        board.push_fen(state)
+        state = board.gather_features(t_history)
+        if board.turn == chess.BLACK:
+            policy = Config.flip_policy(policy)
+
+        state_list.append(state)
+        policy_list.append(policy)
+        value_list.append(value)
+
+    return state_list, policy_list, value_list

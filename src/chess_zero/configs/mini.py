@@ -7,8 +7,10 @@ class PlayDataConfig:
 
 class PlayConfig:
     def __init__(self):
+        self.max_processes = 3
+        self.search_threads = 16
+        self.vram_frac = 0.4
         self.simulation_num_per_move = 10
-        self.thinking_loop = 1
         self.c_puct = 3
         self.noise_eps = 0.25
         self.dirichlet_alpha = 0.3
@@ -37,13 +39,14 @@ class EvaluateConfig:
 class PlayWithHumanConfig:
     def __init__(self):
         self.play_config = PlayConfig()
-        self.play_config.thinking_loop = 5
         self.play_config.tablebase_access = False
 
 
 class TrainerConfig:
     def __init__(self):
         self.batch_size = 32 # 2048
+        self.cleaning_processes = 8  # RAM explosion...
+        self.vram_frac = 0.2
         self.epoch_to_checkpoint = 1
         self.start_total_steps = 0
         self.save_model_steps = 1000

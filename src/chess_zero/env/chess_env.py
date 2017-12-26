@@ -22,27 +22,23 @@ class ChessEnv:
     def __init__(self, config: Config):
         self.config = config
         self.board = None
-        self.done = False
         self.winner = None  # type: Winner
         self.resigned = False
 
     def reset(self):
         self.board = MyBoard()
-        self.done = False
         self.winner = None
         self.resigned = False
         return self
 
     def update(self, fen):
         self.board = MyBoard(fen)
-        self.done = False
         self.winner = None
         self.resigned = False
         return self
 
     def randomize(self, num):  # generates a random position with _num_ pieces on the board. used to generate training data (with tablebase)
         self.board = MyBoard(None)
-        self.done = False
         self.winner = None
         self.resigned = False
 
@@ -68,23 +64,15 @@ class ChessEnv:
 
         self.board.push(move)
 
-        if self._is_game_over():
-            self._conclude_game()
-
-    def _is_game_over(self):
-        return self.board.is_game_over() or self.board.can_claim_draw() or self.fullmove_number >= self.config.play.automatic_draw_turn
-
-    def _conclude_game(self):
-        self.done = True
-        result = self.board.result()
-        if result == '1/2-1/2' or self.board.can_claim_draw() or self.fullmove_number >= self.config.play.automatic_draw_turn:
-            self.winner = Winner.DRAW
-        else:
-            self.winner = Winner.WHITE if result == '1-0' else Winner.BLACK
+        if self.board.is_game_over() or self.board.can_claim_draw() or self.fullmove_number >= self.config.play.automatic_draw_turn:
+            result = self.board.result()
+            if result == '1/2-1/2' or self.board.can_claim_draw() or self.fullmove_number >= self.config.play.automatic_draw_turn:
+                self.winner = Winner.DRAW
+            else:
+                self.winner = Winner.WHITE if result == '1-0' else Winner.BLACK
 
     def _resign(self):
         self.winner = Winner.BLACK if self.board.turn == chess.WHITE else Winner.WHITE
-        self.done = True
         self.resigned = True
 
     def copy(self):
@@ -94,6 +82,11 @@ class ChessEnv:
 
     def transposition_key(self):  # used to be a @property, but that might be slower...?
         return self.board.transposition_key()
+
+    @property
+    def done(self):
+        return self.winner is not None
+
 
     @property
     def fen(self):
@@ -175,10 +168,10 @@ class MyBoard(Board):
         stack = []
 
         stack.append(np.full((1, 8, 8), self.halfmove_clock))  # np.int64's will later be coerced into np.float64's.
-        stack.append(np.full((1, 8, 8), self.has_queenside_castling_rights(False), dtype=np.float64))
-        stack.append(np.full((1, 8, 8), self.has_kingside_castling_rights(False), dtype=np.float64))
-        stack.append(np.full((1, 8, 8), self.has_queenside_castling_rights(True), dtype=np.float64))
-        stack.append(np.full((1, 8, 8), self.has_kingside_castling_rights(True), dtype=np.float64))
+        stack.append(np.full((1, 8, 8), self.has_queenside_castling_rights(chess.BLACK), dtype=np.float64))
+        stack.append(np.full((1, 8, 8), self.has_kingside_castling_rights(chess.BLACK), dtype=np.float64))
+        stack.append(np.full((1, 8, 8), self.has_queenside_castling_rights(chess.WHITE), dtype=np.float64))
+        stack.append(np.full((1, 8, 8), self.has_kingside_castling_rights(chess.WHITE), dtype=np.float64))
         stack.append(np.full((1, 8, 8), self.fullmove_number))
         stack.append(np.full((1, 8, 8), self.turn, dtype=np.float64))
         self._recursive_append(stack, t_history - 1, self.turn)

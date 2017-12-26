@@ -33,7 +33,7 @@ def start(config: Config):
             print(f"Board FEN = {env.fen}")
 
         game = chess.pgn.Game.from_board(env.board)
-        game.headers['White'] = "Human" if human_is_white else f"AI {chess_model.model.digest[:10]}"
-        game.headers['Black'] = f"AI {chess_model.model.digest[:10]}" if human_is_white else "Human"
+        game.headers['White'] = "Human" if human_is_white else f"AI {chess_model.model.digest[:10]}..."
+        game.headers['Black'] = f"AI {chess_model.model.digest[:10]}..." if human_is_white else "Human"
         logger.debug("\n"+str(game))
         print(f"\nEnd of the game. Game result: {env.board.result()}")

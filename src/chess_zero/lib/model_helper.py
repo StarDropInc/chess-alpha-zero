@@ -37,6 +37,7 @@ def save_as_newest_model(rc: ResourceConfig, model):
     weight_path = os.path.join(model_dir, rc.model_weight_filename)
     model.save(config_path, weight_path)
 
+
 def clear_old_models(rc: ResourceConfig):
     dirs = get_newest_model_dirs(rc)[:-1]
     for dir_ in dirs:

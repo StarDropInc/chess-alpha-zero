@@ -1,6 +1,6 @@
-
 import os
 import sys
+import multiprocessing as mp
 from dotenv import load_dotenv, find_dotenv
 
 if find_dotenv():
@@ -14,5 +14,7 @@ if _PATH_ not in sys.path:
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn')
+    sys.setrecursionlimit(10000)
     from chess_zero import manager
     manager.start()

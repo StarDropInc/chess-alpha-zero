@@ -1,41 +1,45 @@
 import os
+from datetime import datetime
 from logging import getLogger
 from random import random
 from time import sleep
-import tensorflow as tf
 import chess
+import chess.pgn
 from chess_zero.agent.model_chess import ChessModel
 from chess_zero.agent.player_chess import ChessPlayer
 from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
 from chess_zero.lib import tf_util
-from chess_zero.lib.data_helper import get_newest_model_dirs, get_old_model_dirs
+from chess_zero.lib.data_helper import get_old_model_dirs
 from chess_zero.lib.model_helper import load_newest_model_weight
+from multiprocessing import Manager
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 
 logger = getLogger(__name__)
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.2)
-    return EvaluateWorker(config, env=ChessEnv(config)).start()
+    # tf_util.set_session_config(config.play.vram_frac)
+    return EvaluateWorker(config).start()
 
 
 class EvaluateWorker:
-    def __init__(self, config: Config, env=None):
+    def __init__(self, config: Config):
         """
 
         :param config:
         """
         self.config = config
-        self.eval_config = self.config.eval
-        self.env = env
-        self.newest_model = None
+        self.play_config = self.config.eval.play_config  # don't need other fields in self.eval...?
+        self.current_model = ChessModel(self.config)
+        self.m = Manager()
+        self.current_pipes = self.m.list([self.current_model.get_pipes(self.config.play.search_threads) for _ in range(self.config.play.max_processes)])
 
     def start(self):
-        self.newest_model = self.load_newest_model()
 
         while True:
-            self.refresh_newest_model()
+            load_newest_model_weight(self.config.resource, self.current_model)
             age = 0
             old_model, model_dir = self.load_old_model(age)  # how many models ago should we load?
             logger.debug(f"starting to evaluate newest model against model {model_dir}")
@@ -46,55 +50,27 @@ class EvaluateWorker:
                 logger.debug(f"the newest model lost to the {age}th archived model ({model_dir})")
 
     def evaluate_model(self, old_model):
-        results = []
-        winning_rate = 0
-        for game_idx in range(self.eval_config.game_num):
-            # ng_win := if ng_model win -> 1, lose -> 0, draw -> None
-            newest_win, newest_is_white = self.play_game(self.newest_model, old_model)
-            if newest_win is not None:
-                results.append(newest_win)
-                winning_rate = sum(results) / len(results)
-            logger.debug(f"game {game_idx}: newest won = {newest_win}, newest played white = {newest_is_white}, winning rate = {winning_rate*100:.1f}, {self.env.fen}%")
-            if results.count(0) >= self.eval_config.game_num * (1-self.eval_config.replace_rate):
-                logger.debug(f"loss count has reached {results.count(0)}, so give up challenge")
-                break
-            if results.count(1) >= self.eval_config.game_num * self.eval_config.replace_rate:
-                logger.debug(f"win count has reached {results.count(1)}, current model wins")
-                break
+        old_pipes = self.m.list([old_model.get_pipes(self.play_config.search_threads) for _ in range(self.play_config.max_processes)])
+        with ProcessPoolExecutor(max_workers=self.play_config.max_processes) as executor:
+            futures = [executor.submit(evaluate_buffer, self.config, self.current_pipes, old_pipes) for _ in range(self.config.eval.game_num)]
+            results = []
+            game_idx = 0
+            for future in as_completed(futures):
+                game_idx += 1
+                current_win, env, current_is_white = future.result()  # why .get() as opposed to .result()?
+                results.append(current_win)
+                w = results.count(True)
+                d = results.count(None)
+                l = results.count(False)
+                logger.debug(f"game {game_idx}: current won = {current_win} as {'White' if current_is_white else 'Black'}, W/D/L = {w}/{d}/{l}, {env.fen()}")
 
-        winning_rate = sum(results) / len(results) if len(results) != 0 else 0
-        logger.debug(f"winning rate {winning_rate*100:.1f}%")
-        return winning_rate >= self.eval_config.replace_rate
+                game = chess.pgn.Game.from_board(env.board)  # PGN dump
+                game.headers['White'] = f"AI {self.current_model.digest[:10]}..." if current_is_white else f"AI {old_model.digest[:10]}..."
+                game.headers['Black'] = f"AI {old_model.digest[:10]}..." if current_is_white else f"AI {self.current_model.digest[:10]}..."
+                game.headers["Date"] = datetime.now().strftime("%Y.%m.%d")
+                logger.debug("\n" + str(game))
 
-    def play_game(self, newest_model, old_model):
-        random_endgame = self.eval_config.play_config.random_endgame
-        if random_endgame == -1:
-            self.env.reset()
-        else:
-            self.env.randomize(random_endgame)
-
-        newest_player = ChessPlayer(self.config, newest_model, play_config=self.eval_config.play_config)
-        old_player = ChessPlayer(self.config, old_model, play_config=self.eval_config.play_config)
-        newest_is_white = random() < 0.5
-
-        while not self.env.done:
-            ai = newest_player if newest_is_white == (self.env.board.turn == chess.WHITE) else old_player
-            action = ai.action(self.env)
-            self.env.step(action)
-
-        newest_win = None
-        if self.env.winner != Winner.DRAW:
-            newest_win = newest_is_white == (self.env.winner == Winner.WHITE)
-        return newest_win, newest_is_white
-
-    def load_newest_model(self):
-        model = ChessModel(self.config)
-        load_newest_model_weight(self.config.resource, model)
-        model.graph = tf.get_default_graph()
-        return model
-
-    def refresh_newest_model(self):
-        load_newest_model_weight(self.config.resource, self.newest_model)
+            return w / (w + l) >= self.config.eval.replace_rate
 
     def load_old_model(self, age):
         rc = self.config.resource
@@ -109,13 +85,33 @@ class EvaluateWorker:
         weight_path = os.path.join(model_dir, rc.model_weight_filename)
         model = ChessModel(self.config)
         model.load(config_path, weight_path)
-        model.graph = tf.get_default_graph()
         return model, model_dir
 
-    def remove_model(self, model_dir):
-        rc = self.config.resource
-        config_path = os.path.join(model_dir, rc.next_generation_model_config_filename)
-        weight_path = os.path.join(model_dir, rc.next_generation_model_weight_filename)
-        os.remove(config_path)
-        os.remove(weight_path)
-        os.rmdir(model_dir)
+
+def evaluate_buffer(config, current, old) -> (float, ChessEnv, bool):
+    current_pipes = current.pop()
+    old_pipes = old.pop()
+
+    random_endgame = config.eval.play_config.random_endgame
+    if random_endgame == -1:
+        env = ChessEnv(config).reset()
+    else:
+        env = ChessEnv(config).randomize(random_endgame)
+
+    current_is_white = random() < 0.5
+
+    current_player = ChessPlayer(config, pipes=current_pipes, play_config=config.eval.play_config)
+    old_player = ChessPlayer(config, pipes=old_pipes, play_config=config.eval.play_config)
+
+    while not env.done:
+        ai = current_player if current_is_white == (env.board.turn == chess.WHITE) else old_player
+        action = ai.action(env)
+        env.step(action)
+
+    current_win = None
+    if env.winner != Winner.DRAW:
+        current_win = current_is_white == (env.winner == Winner.WHITE)
+
+    current.append(current_pipes)
+    old.append(old_pipes)
+    return current_win, env, current_is_white
