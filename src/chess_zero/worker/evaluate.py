@@ -62,7 +62,7 @@ class EvaluateWorker:
                 w = results.count(True)
                 d = results.count(None)
                 l = results.count(False)
-                logger.debug(f"game {game_idx}: current won = {current_win} as {'White' if current_is_white else 'Black'}, W/D/L = {w}/{d}/{l}, {env.fen()}")
+                logger.debug(f"game {game_idx}: current won = {current_win} as {'White' if current_is_white else 'Black'}, W/D/L = {w}/{d}/{l}, {env.fen}")
 
                 game = chess.pgn.Game.from_board(env.board)  # PGN dump
                 game.headers['White'] = f"AI {self.current_model.digest[:10]}..." if current_is_white else f"AI {old_model.digest[:10]}..."
