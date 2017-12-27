@@ -1,6 +1,6 @@
 class PlayDataConfig:
     def __init__(self):
-        self.nb_game_in_file = 20  # 100
+        self.nb_game_in_file = 100  # 100
         self.sl_nb_game_in_file = 100
         self.max_file_num = 100  # 10
 
@@ -14,7 +14,7 @@ class PlayConfig:
         self.c_puct = 3
         self.noise_eps = .25
         self.dirichlet_alpha = 0.3
-        self.change_tau_turn = 40
+        self.change_tau_turn = 80
         self.automatic_draw_turn = 100
         self.virtual_loss = 3
         self.parallel_search_num = 16
@@ -22,8 +22,8 @@ class PlayConfig:
         self.wait_for_expanding_sleep_sec = 0.000001
         self.resign_threshold = None
         self.min_resign_turn = 10
-        self.random_endgame = -1  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
-        self.tablebase_access = False
+        self.random_endgame = 5  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
+        self.tablebase_access = True
 
 
 class EvaluateConfig:
@@ -33,6 +33,7 @@ class EvaluateConfig:
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 100
         self.play_config.noise_eps = 0.25  # 0.0
+        self.random_endgame = -1
         self.play_config.tablebase_access = False
 
 
@@ -49,10 +50,10 @@ class TrainerConfig:
         self.batch_size = 32  # 2048
         self.epoch_to_checkpoint = 1
         self.start_total_steps = 0
-        self.save_model_steps = 2000  # 2000
+        self.save_model_steps = 10000  # 2000
         self.load_data_steps = 1000
         self.min_data_size_to_learn = 10000
-        self.max_num_files_in_memory = 60
+        self.max_num_files_in_memory = 20
 
 
 class ModelConfig:

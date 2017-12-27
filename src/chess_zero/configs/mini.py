@@ -33,6 +33,7 @@ class EvaluateConfig:
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 10
         self.play_config.noise_eps = 0
+        self.random_endgame = -1
         self.play_config.tablebase_access = False
 
 

@@ -32,14 +32,14 @@ class EvaluateWorker:
         """
         self.config = config
         self.play_config = self.config.eval.play_config  # don't need other fields in self.eval...?
-        self.current_model = ChessModel(self.config)
+        self.model = ChessModel(self.config)
         self.m = Manager()
-        self.current_pipes = self.m.list([self.current_model.get_pipes(self.config.play.search_threads) for _ in range(self.config.play.max_processes)])
+        self.pipes = self.m.list([self.model.get_pipes(self.config.play.search_threads) for _ in range(self.config.play.max_processes)])
 
     def start(self):
 
         while True:
-            load_newest_model_weight(self.config.resource, self.current_model)
+            load_newest_model_weight(self.config.resource, self.model)
             age = 0
             old_model, model_dir = self.load_old_model(age)  # how many models ago should we load?
             logger.debug(f"starting to evaluate newest model against model {model_dir}")
@@ -52,7 +52,7 @@ class EvaluateWorker:
     def evaluate_model(self, old_model):
         old_pipes = self.m.list([old_model.get_pipes(self.play_config.search_threads) for _ in range(self.play_config.max_processes)])
         with ProcessPoolExecutor(max_workers=self.play_config.max_processes) as executor:
-            futures = [executor.submit(evaluate_buffer, self.config, self.current_pipes, old_pipes) for _ in range(self.config.eval.game_num)]
+            futures = [executor.submit(evaluate_buffer, self.config, self.pipes, old_pipes) for _ in range(self.config.eval.game_num)]
             results = []
             game_idx = 0
             for future in as_completed(futures):
@@ -65,10 +65,10 @@ class EvaluateWorker:
                 logger.debug(f"game {game_idx}: current won = {current_win} as {'White' if current_is_white else 'Black'}, W/D/L = {w}/{d}/{l}, {env.fen}")
 
                 # game = chess.pgn.Game.from_board(env.board)  # PGN dump
-                # game.headers['White'] = f"AI {self.current_model.digest[:10]}..." if current_is_white else f"AI {old_model.digest[:10]}..."
-                # game.headers['Black'] = f"AI {old_model.digest[:10]}..." if current_is_white else f"AI {self.current_model.digest[:10]}..."
+                # game.headers['White'] = f"AI {self.model.digest[:10]}..." if current_is_white else f"AI {old_model.digest[:10]}..."
+                # game.headers['Black'] = f"AI {old_model.digest[:10]}..." if current_is_white else f"AI {self.model.digest[:10]}..."
                 # game.headers["Date"] = datetime.now().strftime("%Y.%m.%d")
-                # logger.debug("\n" + str(game))
+                # logger.info("\n" + str(game))
 
             return w / (w + l) >= self.config.eval.replace_rate
 
@@ -89,7 +89,7 @@ class EvaluateWorker:
 
 
 def evaluate_buffer(config, current, old) -> (float, ChessEnv, bool):
-    current_pipes = current.pop()
+    pipes = current.pop()
     old_pipes = old.pop()
 
     random_endgame = config.eval.play_config.random_endgame
@@ -100,7 +100,7 @@ def evaluate_buffer(config, current, old) -> (float, ChessEnv, bool):
 
     current_is_white = random() < 0.5
 
-    current_player = ChessPlayer(config, pipes=current_pipes, play_config=config.eval.play_config)
+    current_player = ChessPlayer(config, pipes=pipes, play_config=config.eval.play_config)
     old_player = ChessPlayer(config, pipes=old_pipes, play_config=config.eval.play_config)
 
     while not env.done:
@@ -112,6 +112,6 @@ def evaluate_buffer(config, current, old) -> (float, ChessEnv, bool):
     if env.winner != Winner.DRAW:
         current_win = current_is_white == (env.winner == Winner.WHITE)
 
-    current.append(current_pipes)
+    current.append(pipes)
     old.append(old_pipes)
     return current_win, env, current_is_white

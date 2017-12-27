@@ -14,8 +14,8 @@ class PlayConfig:
         self.c_puct = 3
         self.noise_eps = 0.25
         self.dirichlet_alpha = 0.3
-        self.change_tau_turn = 40
-        self.automatic_draw_turn = 40
+        self.change_tau_turn = 80
+        self.automatic_draw_turn = 100
         self.virtual_loss = 3
         self.parallel_search_num = 16
         self.prediction_worker_sleep_sec = 0.0001
@@ -23,7 +23,7 @@ class PlayConfig:
         self.resign_threshold = None
         self.min_resign_turn = 10
         self.random_endgame = -1  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
-        self.tablebase_access = True
+        self.tablebase_access = False
 
 
 class EvaluateConfig:
@@ -33,6 +33,7 @@ class EvaluateConfig:
         self.play_config = PlayConfig()
         self.play_config.simulation_num_per_move = 800
         self.play_config.noise_eps = 0
+        self.random_endgame = -1
         self.play_config.tablebase_access = False
 
 
@@ -49,10 +50,10 @@ class TrainerConfig:
         self.vram_frac = 1.0
         self.epoch_to_checkpoint = 1
         self.start_total_steps = 0
-        self.save_model_steps = 2000
+        self.save_model_steps = 10000
         self.load_data_steps = 1000
         self.min_data_size_to_learn = 10000
-        self.max_num_files_in_memory = 40
+        self.max_num_files_in_memory = 20
 
 
 class ModelConfig:

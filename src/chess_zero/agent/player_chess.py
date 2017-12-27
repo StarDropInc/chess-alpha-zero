@@ -8,7 +8,7 @@ import chess
 
 from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
-# import chess.gaviota
+import chess.gaviota
 # import chess.syzygy
 
 QueueItem = namedtuple("QueueItem", "state future")
@@ -20,7 +20,7 @@ logger = getLogger(__name__)
 # these are from AGZ nature paper
 class VisitStats:
     def __init__(self):
-        self.a = defaultdict(ActionStats)  # (key, value) of type (Move, ActionStats)?
+        self.a = defaultdict(ActionStats)  # (key, value) of type (Move, ActionStats)
         self.sum_n = 0
 
 
@@ -39,7 +39,7 @@ class ChessPlayer:
 
         self.labels = self.config.labels
         self.n_labels = config.n_labels
-        # self.tablebases = chess.gaviota.open_tablebases(self.config.resource.tablebase_dir)
+        self.tablebases = chess.gaviota.open_tablebases(self.config.resource.tablebase_dir)
         # self.tablebases = chess.syzygy.open_tablebases(self.config.resource.tablebase_dir)
         self.moves = []
         if dummy:
@@ -158,7 +158,7 @@ class ChessPlayer:
         # under syzygy, wdl can be 2 or -2. (1 and -1 are cursed win and blessed loss, respectively.)
         if wdl >= 1:
             leaf_v = 1
-        elif wdl <= 1:
+        elif wdl <= -1:
             leaf_v = -1
         else:
             leaf_v = 0
@@ -234,9 +234,23 @@ class ChessPlayer:
         return move_t, action_t
 
     def select_action_tablebase(self, env):
+        key = env.transposition_key()
+
+        with self.node_lock[key]:
+            if key not in self.tree:
+                for move in env.board.legal_moves:  # artificially populate legal moves
+                    self.tree[key].a[move] = None
+
+        return self.select_action_gaviota(env)
+        # return self.select_action_syzygy(env)
+
+    def select_action_gaviota(self, env):
         moves = {}
-        for move in env.board.legal_moves:
+        for move in self.tree[env.transposition_key()].a.keys():
             env.board.push(move)
+            if env.board.is_checkmate():
+                env.board.pop()
+                return move, self.labels[move]
             dtm = self.tablebases.probe_dtm(env.board)
             value = 1/dtm if dtm != 0.0 else 0.0
             moves[move] = value
@@ -245,28 +259,27 @@ class ChessPlayer:
         action_t = self.labels[move_t]
         return move_t, action_t
 
-    # Uncomment the below code if using the SYZYGY TABLEBASES. NOTE: syzygy only provides _distance to zero_, which in general does not coincide with optimal _distance to mate_.
-    # def select_action_tablebase(self, env):
-    #     violent_wins = {}
-    #     quiets_and_draws = {}
-    #     violent_losses = {}
-    #     for move in env.board.legal_moves:  # note: not worrying about hashing this.
-    #         is_zeroing = env.board.is_zeroing(move)
-    #         env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the tablebase bases. but gaviota are much larger...
-    #         dtz = self.tablebases.probe_dtz(env.board)  # casting to float isn't necessary; is coerced below upon comparison to 0.0
-    #         value = 1/dtz if dtz != 0.0 else 0.0  # a trick: fast mated < slow mated < draw < slow mate < fast mate
-    #         if is_zeroing and value < 0:
-    #             violent_wins[move] = value
-    #         elif not is_zeroing or value == 0:
-    #             quiets_and_draws[move] = value
-    #         elif is_zeroing and value > 0:
-    #             violent_losses[move] = value
-    #         env.board.pop()
-    #     if violent_wins:
-    #         move_t = min(violent_wins, key=violent_wins.get)
-    #     elif quiets_and_draws:
-    #         move_t = min(quiets_and_draws, key=quiets_and_draws.get)
-    #     elif violent_losses:
-    #         move_t = min(violent_losses, key=violent_losses.get)
-    #     action_t = self.labels[move_t]
-    #     return move_t, action_t
+    def select_action_syzygy(self, env):
+        violent_wins = {}
+        quiets_and_draws = {}
+        violent_losses = {}
+        for move in self.tree[env.transposition_key()].a.keys():  # note: not worrying about hashing this.
+            is_zeroing = env.board.is_zeroing(move)
+            env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the tablebase bases. but gaviota are much larger...
+            dtz = self.tablebases.probe_dtz(env.board)  # casting to float isn't necessary; is coerced below upon comparison to 0.0
+            value = 1/dtz if dtz != 0.0 else 0.0  # a trick: fast mated < slow mated < draw < slow mate < fast mate
+            if is_zeroing and value < 0:
+                violent_wins[move] = value
+            elif not is_zeroing or value == 0:
+                quiets_and_draws[move] = value
+            elif is_zeroing and value > 0:
+                violent_losses[move] = value
+            env.board.pop()
+        if violent_wins:
+            move_t = min(violent_wins, key=violent_wins.get)
+        elif quiets_and_draws:
+            move_t = min(quiets_and_draws, key=quiets_and_draws.get)
+        elif violent_losses:
+            move_t = min(violent_losses, key=violent_losses.get)
+        action_t = self.labels[move_t]
+        return move_t, action_t

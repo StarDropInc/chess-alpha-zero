@@ -150,6 +150,6 @@ tf_util.set_session_config(per_process_gpu_memory_fraction=0.2)
 Less batch_size will reduce memory usage of `opt`.
 Try to change `TrainerConfig#batch_size` in `NormalConfig`.
 
-Syzygy Tablebases
+Tablebases
 -------
-This implementation optionally uses the syzygy tablebases for endgame evaluation. The tablebase files should be placed into the directory chess-alpha-zero/syzygy. They can be generated from scratch through [the github repository](https://github.com/syzygy1/tb), or downloaded via the torrent "Syzygy 3-4-5 Individual Files" [here](http://oics.olympuschess.com/tracker/index.php).
+This implementation supports using the Gaviota or syzygy tablebases for endgame evaluation. The tablebase files should be placed into the directory `chess-alpha-zero/tablebases`, and the appropriate code in `player_chess.py` should be commented in and out depending on which of these two tablebases is used. Gaviota are reccommended (as they provide DTM as opposed to DTZ information). The [Gaviota](https://github.com/michiguel/Gaviota-Tablebases) and [syzygy](https://github.com/syzygy1/tb) bases can be generated from scratch, or downloaded directly via [torrents](http://oics.olympuschess.com/tracker/index.php) ("Gaviota" and "Syzygy 3-4-5 Individual Files", respectively).

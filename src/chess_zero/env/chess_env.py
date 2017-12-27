@@ -127,7 +127,7 @@ class MyBoard(Board):
 
     def push_fen(self, fen):  # given a new FEN, either makes the corresponding move, or adopts the new FEN from scratch if there is none.
         new = chess.Board(fen)
-        if self.turn != new.turn and self.fullmove_number <= new.fullmove_number:  # WARNING: this will break if a game lasts for just one move (i.e. is over when it starts)
+        if self.fullmove_number == new.fullmove_number and self.turn == chess.WHITE and new.turn == chess.BLACK or self.fullmove_number < new.fullmove_number:  # WARNING: this will break if a game lasts for just one move (i.e. is over when it starts)
             old_ss = chess.SquareSet(self.occupied_co[self.turn])
             new_ss = chess.SquareSet(new.occupied_co[self.turn])
             diff = list(new_ss.difference(old_ss))
@@ -176,14 +176,6 @@ class MyBoard(Board):
         stack.append(np.full((1, 8, 8), self.turn, dtype=np.float64))
         self._recursive_append(stack, t_history - 1, self.turn)
         return np.concatenate(stack)
-
-        # board_enemy = [ord(self.piece_at(square).symbol()) if self.piece_at(square) is not None and self.piece_at(square).color != self.turn else 0 for square in chess.SquareSet(chess.BB_ALL)]
-        # board_enemy = np.reshape(board_enemy, ((8, 8)))
-        # stack.append(np.flip(board_enemy, 0))
-        # board_own = [ord(self.piece_at(square).symbol()) if self.piece_at(square) is not None and self.piece_at(square).color == self.turn else 0 for square in chess.SquareSet(chess.BB_ALL)]
-        # board_own = np.reshape(board_own, ((8, 8)))
-        # stack.append(np.flip(board_own, 0))
-        # return np.stack(stack, axis=0)
 
     def _recursive_append(self, stack, depth, side):
         if depth > 0:

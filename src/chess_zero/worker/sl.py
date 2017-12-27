@@ -10,6 +10,7 @@ from chess_zero.env.chess_env import ChessEnv, Winner
 from chess_zero.lib import tf_util
 from chess_zero.lib.data_helper import write_game_data_to_file, find_pgn_files
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from threading import Thread
 
 logger = getLogger(__name__)
 
@@ -33,7 +34,7 @@ class SupervisedLearningWorker:  # thanks to @Zeta36 and @Akababa for this class
         self.buffer = []
         start_time = time()
 
-        with ProcessPoolExecutor(max_workers=7) as executor:
+        with ProcessPoolExecutor(max_workers=8) as executor:
             games = self.get_games_from_all_files()
             game_idx = 0
             for future in as_completed([executor.submit(supervised_buffer, self.config, game) for game in games]):
@@ -45,8 +46,6 @@ class SupervisedLearningWorker:  # thanks to @Zeta36 and @Akababa for this class
                 end_time = time()
                 logger.debug(f"game {game_idx} time={(end_time - start_time):.3f}s, turn={int(env.fullmove_number)}. {env.winner}, resigned: {env.resigned}, {env.fen}")
                 start_time = end_time
-
-        # self.flush_buffer()  # uneven number of games in file.
 
     def get_games_from_all_files(self):
         files = find_pgn_files(self.config.resource.play_data_dir)
@@ -68,9 +67,8 @@ class SupervisedLearningWorker:  # thanks to @Zeta36 and @Akababa for this class
         game_id = datetime.now().strftime("%Y%m%d-%H%M%S.%f")
         path = os.path.join(rc.play_data_dir, rc.play_data_filename_tmpl % game_id)
         logger.info(f"saving play data to {path}")
-        # thread = Thread(target = write_game_data_to_file, args=(path, self.buffer))
-        # thread.start()
-        write_game_data_to_file(path, self.buffer)  # was having problems with multi-threading: file-write not failing to complete quickly and failing to be loaded by the trainer.
+        thread = Thread(target = write_game_data_to_file, args=(path, self.buffer))
+        thread.start()
         self.buffer = []
 
 
