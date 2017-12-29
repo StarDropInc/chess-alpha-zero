@@ -124,7 +124,7 @@ class Config:
                     else:
                         new_v = v
                     new_p[v * 64 + r * 8 + f] = leaf_p[new_v * 64 + (7 - r) * 8 + (7 - f)]
-        return new_p
+        return list(new_p)
 
 class Options:
     new = False

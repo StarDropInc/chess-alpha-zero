@@ -5,11 +5,11 @@ from threading import Lock
 
 import numpy as np
 import chess
+import math
 
 from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
 import chess.gaviota
-# import chess.syzygy
 
 QueueItem = namedtuple("QueueItem", "state future")
 HistoryItem = namedtuple("HistoryItem", "action policy values visit")
@@ -40,7 +40,6 @@ class ChessPlayer:
         self.labels = self.config.labels
         self.n_labels = config.n_labels
         self.tablebases = chess.gaviota.open_tablebases(self.config.resource.tablebase_dir)
-        # self.tablebases = chess.syzygy.open_tablebases(self.config.resource.tablebase_dir)
         self.moves = []
         if dummy:
             return
@@ -57,7 +56,7 @@ class ChessPlayer:
 
         if self.play_config.tablebase_access and env.board.num_pieces() <= 5:  # tablebase takes over
             root_value = self.tablebase_and_evaluate(env)
-            policy = self.tablebase_policy(env)  # note: returns an "all or nothing" policy, regardless of tau, etc.
+            policy = self.tablebase_policy(env)
         else:
             root_value = self.search_moves(env)  # this should leave env invariant!
             policy = self.calc_policy(env)
@@ -200,10 +199,34 @@ class ChessPlayer:
             return ret
 
     def tablebase_policy(self, env):
-        _, action = self.select_action_tablebase(env)
+        choices = self._tablebase_choices(env)
         ret = np.zeros(self.n_labels)
-        ret[action] = 1
+        ret[[self.labels[choice] for choice in choices]] = 1 / len(choices)
         return ret
+
+    def _tablebase_choices(self, env):
+        key = env.transposition_key()
+
+        with self.node_lock[key]:
+            if key not in self.tree:
+                for move in env.board.legal_moves:  # artificially populate legal moves
+                    self.tree[key].a[move] = None
+
+        moves = {}
+        for move in self.tree[env.transposition_key()].a.keys():
+            env.board.push(move)
+            if env.board.is_checkmate():
+                moves[move] = -2.0
+                env.board.pop()
+                continue
+            dtm = self.tablebases.probe_dtm(env.board)
+            value = 1/dtm if dtm != 0.0 else 0.0
+            moves[move] = value
+            env.board.pop()
+
+        best = min(moves.values())
+        choices = [move for move, value in moves.items() if math.isclose(best, value, rel_tol=1e-5)]
+        return choices
 
     def select_action_q_and_u(self, env, is_root_node):
         # this method is called with state locked
@@ -234,52 +257,8 @@ class ChessPlayer:
         return move_t, action_t
 
     def select_action_tablebase(self, env):
-        key = env.transposition_key()
-
-        with self.node_lock[key]:
-            if key not in self.tree:
-                for move in env.board.legal_moves:  # artificially populate legal moves
-                    self.tree[key].a[move] = None
-
-        return self.select_action_gaviota(env)
-        # return self.select_action_syzygy(env)
-
-    def select_action_gaviota(self, env):
-        moves = {}
-        for move in self.tree[env.transposition_key()].a.keys():
-            env.board.push(move)
-            if env.board.is_checkmate():
-                env.board.pop()
-                return move, self.labels[move]
-            dtm = self.tablebases.probe_dtm(env.board)
-            value = 1/dtm if dtm != 0.0 else 0.0
-            moves[move] = value
-            env.board.pop()
-        move_t = min(moves, key=moves.get)
+        choices = self._tablebase_choices(env)
+        move_t = choices[0]
         action_t = self.labels[move_t]
-        return move_t, action_t
 
-    def select_action_syzygy(self, env):
-        violent_wins = {}
-        quiets_and_draws = {}
-        violent_losses = {}
-        for move in self.tree[env.transposition_key()].a.keys():  # note: not worrying about hashing this.
-            is_zeroing = env.board.is_zeroing(move)
-            env.board.push(move)  # note: minimizes distance to _zero_. distance to mate is not available through the tablebase bases. but gaviota are much larger...
-            dtz = self.tablebases.probe_dtz(env.board)  # casting to float isn't necessary; is coerced below upon comparison to 0.0
-            value = 1/dtz if dtz != 0.0 else 0.0  # a trick: fast mated < slow mated < draw < slow mate < fast mate
-            if is_zeroing and value < 0:
-                violent_wins[move] = value
-            elif not is_zeroing or value == 0:
-                quiets_and_draws[move] = value
-            elif is_zeroing and value > 0:
-                violent_losses[move] = value
-            env.board.pop()
-        if violent_wins:
-            move_t = min(violent_wins, key=violent_wins.get)
-        elif quiets_and_draws:
-            move_t = min(quiets_and_draws, key=quiets_and_draws.get)
-        elif violent_losses:
-            move_t = min(violent_losses, key=violent_losses.get)
-        action_t = self.labels[move_t]
         return move_t, action_t
