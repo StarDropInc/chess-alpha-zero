@@ -152,4 +152,4 @@ Try to change `TrainerConfig#batch_size` in `NormalConfig`.
 
 Tablebases
 -------
-This implementation supports using the Gaviota or syzygy tablebases for endgame evaluation. The tablebase files should be placed into the directory `chess-alpha-zero/tablebases`, and the appropriate code in `player_chess.py` should be commented in and out depending on which of these two tablebases is used. Gaviota are reccommended (as they provide DTM as opposed to DTZ information). The [Gaviota](https://github.com/michiguel/Gaviota-Tablebases) and [syzygy](https://github.com/syzygy1/tb) bases can be generated from scratch, or downloaded directly via [torrents](http://oics.olympuschess.com/tracker/index.php) ("Gaviota" and "Syzygy 3-4-5 Individual Files", respectively).
+This implementation supports using the Gaviota tablebases for endgame evaluation. The tablebase files should be placed into the directory `chess-alpha-zero/tablebases`. The Gaviota bases can be generated from scratch (see the [repository](https://github.com/michiguel/Gaviota-Tablebases)), or downloaded directly via torrent (see "Gaviota" on the [Olympus Tracker](http://oics.olympuschess.com/tracker/index.php)).
