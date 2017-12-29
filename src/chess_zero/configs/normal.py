@@ -22,8 +22,8 @@ class PlayConfig:
         self.wait_for_expanding_sleep_sec = 0.00001
         self.resign_threshold = None
         self.min_resign_turn = 10
-        self.random_endgame = 5  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
-        self.tablebase_access = True
+        self.random_endgame = -1  # -1 for regular play, n > 2 for randomly generated endgames with n pieces.
+        self.tablebase_access = False
 
 
 class EvaluateConfig:
